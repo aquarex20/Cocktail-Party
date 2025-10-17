@@ -1,0 +1,86 @@
+# ============================================
+# FICHIERS LOURDS - Médias
+# ============================================
+
+# Vidéos
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.webm
+*.m4v
+
+# Audio
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
+*.wma
+*.m4a
+
+# Images lourdes
+*.psd
+*.ai
+*.raw
+*.tiff
+*.tif
+
+# Garder seulement les petites images de démo (optionnel)
+# !demo_small.jpg
+# !thumbnail.png
+
+
+# ============================================
+# FICHIERS MODÈLES IA & DONNÉES
+# ============================================
+
+# Modèles MediaPipe (téléchargés automatiquement)
+*.tflite
+*.onnx
+*.pb
+*.pbtxt
+
+# Modèles ML généraux
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Datasets
+*.csv
+*.json
+*.parquet
+*.feather
+
+# Fichiers RTTM générés (garder les exemples si nécessaire)
+# *.rttm
+
+
+# ============================================
+# PYTHON
+# ============================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64

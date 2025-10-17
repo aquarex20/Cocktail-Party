@@ -1,0 +1,10 @@
+# Requirements for Video Analysis Template
+
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+
+# Optional: For advanced audio analysis
+# scipy>=1.11.0
+# librosa>=0.10.0
+
