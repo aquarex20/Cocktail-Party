@@ -10,16 +10,21 @@ def test_imports():
     """Test if all required packages can be imported."""
     print("Testing imports...")
     
-    tests = {
+    required_tests = {
         'OpenCV': 'cv2',
         'MediaPipe': 'mediapipe',
-        'NumPy': 'numpy',
+        'NumPy': 'numpy'
+    }
+    
+    optional_tests = {
+        'face_recognition': 'face_recognition',
         'PyAudio': 'pyaudio'
     }
     
     results = {}
     
-    for name, module in tests.items():
+    # Test required packages
+    for name, module in required_tests.items():
         try:
             __import__(module)
             results[name] = '✓ OK'
@@ -27,6 +32,15 @@ def test_imports():
         except ImportError as e:
             results[name] = f'✗ FAILED: {str(e)}'
             print(f"  {name}: ✗ FAILED")
+    
+    # Test optional packages
+    print("\nOptional packages:")
+    for name, module in optional_tests.items():
+        try:
+            __import__(module)
+            print(f"  {name}: ✓ OK")
+        except ImportError:
+            print(f"  {name}: ⚠️  Not installed (optional)")
     
     return all('OK' in v for v in results.values())
 
@@ -108,6 +122,12 @@ def test_versions():
         pass
     
     try:
+        import face_recognition
+        print(f"  face_recognition: {face_recognition.__version__}")
+    except:
+        pass
+    
+    try:
         import pyaudio
         print(f"  PyAudio: {pyaudio.__version__}")
     except:
@@ -144,9 +164,19 @@ def main():
         print("✓ All tests passed!")
         if not camera_ok:
             print("\n⚠️  Camera test failed, but you can still process video files.")
+        
+        # Check for face_recognition
+        try:
+            import face_recognition
+            print("\n✓ face_recognition is installed - full face recognition available")
+        except ImportError:
+            print("\n⚠️  face_recognition not installed - will use basic features")
+            print("   For advanced face recognition, run: pip install face-recognition")
+        
         print("\nYou can now run:")
         print("  python simple_video_demo.py")
         print("  python video_analysis_template.py")
+        print("  python video_analysis_with_face_recognition.py")
     else:
         print("❌ Some tests failed. Please check the errors above.")
         sys.exit(1)
