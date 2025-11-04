@@ -9,6 +9,7 @@ pip install -r requirements_video_analysis.txt
 ```
 
 This installs only 3 dependencies:
+
 - **opencv-python** - Video processing
 - **mediapipe** - Face detection and facial landmarks
 - **numpy** - Numerical operations
@@ -37,23 +38,28 @@ More structured code with better architecture for custom modifications.
 from video_analysis_template import VideoAnalyzer
 
 # Analyze video file
-analyzer = VideoAnalyzer(video_source="your_video.mp4")
-analyzer.run(display=True, output_path="analyzed_output.mp4")
+#analyzer = VideoAnalyzer(video_source="your_video.mp4")
+analyzer = VideoAnalyzer(video_source="screen")
+nalyzer.run(display=True, output_path="analyzed_output.mp4")
 ```
 
 ## How It Works
 
 ### Face Detection
+
 Uses MediaPipe Face Detection to identify faces in each frame.
 
 ### Talking Detection
+
 Analyzes mouth movement by:
+
 1. Extracting facial landmarks around the mouth
 2. Calculating Mouth Aspect Ratio (MAR) = vertical_distance / horizontal_distance
 3. Tracking MAR variance over time
 4. High variance = mouth moving = talking
 
 ### Visual Feedback
+
 - **Green box** = Person is talking
 - **Blue/Red box** = Person is silent
 
@@ -81,7 +87,7 @@ ret, frame = analyzer.cap.read()
 
 if ret:
     annotated_frame, faces = analyzer.process_frame(frame)
-    
+
     for face in faces:
         print(f"Face {face.id}: Talking={face.is_talking}, Confidence={face.confidence:.2f}")
 ```
@@ -126,16 +132,19 @@ analyzer.run(output_path="output.mp4")
 ## Troubleshooting
 
 ### No faces detected
+
 - Ensure good lighting
 - Check if camera is working: `ls /dev/video*` (Linux) or System Preferences (Mac)
 - Lower detection confidence threshold
 - Make sure faces are clearly visible
 
 ### False talking detections
+
 - Increase threshold: `detect_talking(frame, face, threshold=0.08)`
 - Ensure stable camera (movement can cause false positives)
 
 ### Low FPS / Slow performance
+
 ```python
 # Resize frames for faster processing
 frame = cv2.resize(frame, (640, 480))
@@ -146,6 +155,7 @@ if frame_count % 2 == 0:  # Process every 2nd frame
 ```
 
 ### Camera not opening
+
 ```python
 # Try different indices
 for i in range(4):
@@ -189,4 +199,3 @@ audio_speakers = diart_pipeline.process_audio(audio_chunk)
 
 - [MediaPipe Documentation](https://google.github.io/mediapipe/)
 - [OpenCV Python Tutorials](https://docs.opencv.org/master/d6/d00/tutorial_py_root.html)
-
