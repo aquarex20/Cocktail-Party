@@ -565,3 +565,4 @@ if has_motion(frame):
 - Traitement parallèle (multiprocessing)
 - Batch processing (traiter frames par groupes)
 - Downsampling adaptatif (réduire résolution si trop de visages)
+

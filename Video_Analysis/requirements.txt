@@ -1,0 +1,8 @@
+numpy
+scipy
+requests
+httpx
+sounddevice
+webrtcvad
+TTS
+faster-whisper

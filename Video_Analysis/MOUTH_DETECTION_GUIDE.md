@@ -302,3 +302,4 @@ Pour détecter la **parole**, combiner:
 3. **Synchronisation audio-vidéo** (bouche bouge + son présent = parole)
 
 Voir: `video_analysis_template.py` pour un exemple complet avec audio.
+
