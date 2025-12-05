@@ -3,6 +3,6 @@ scipy
 requests
 httpx
 sounddevice
-webrtcvad
-TTS
+webrtcvad-wheels
+coqui-tts
 faster-whisper
