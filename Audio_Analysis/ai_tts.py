@@ -1,12 +1,13 @@
 # tts_calibrated.py
 import threading, queue, time, collections, io, os
+import sys
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, messagebox
 from scipy.signal import resample_poly
 import requests
 import asyncio
-import json 
+import json
 import httpx
 
 import sounddevice as sd
@@ -14,6 +15,10 @@ import webrtcvad
 
 from TTS.api import TTS
 from faster_whisper import WhisperModel
+
+# Add parent directory to path for speaker_diarization module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from speaker_diarization import SpeakerDiarizer
 
 # ================= Config =================
 DEBUG = True
@@ -62,6 +67,15 @@ last_5_transcript = ""
 tts = TTS(model_name=TTS_MODEL, progress_bar=True, gpu=False)
 TTS_SR = getattr(getattr(tts, "synthesizer", None), "output_sample_rate", 22050)
 stt_model = WhisperModel(STT_MODEL, device=STT_DEVICE, compute_type=STT_COMPUTE)
+
+# Initialize speaker diarization
+if DEBUG: print("[DIARIZATION] Initializing speaker diarization...")
+diarizer = SpeakerDiarizer(
+    similarity_threshold=0.78,
+    max_speakers=10,
+    device="cpu"  # Use "cuda" if GPU available
+)
+if DEBUG: print(f"[DIARIZATION] Ready: {diarizer.is_ready()}")
 
 # State
 state = {
@@ -401,7 +415,18 @@ def transcribe_and_speak_44k(audio_bytes_44k: bytes):
     x44 = np.frombuffer(audio_bytes_44k, dtype=np.int16).astype(np.float32)
     if x44.size == 0:
         txt_out = ""
+        speaker_id = "Human"
     else:
+        # Identify speaker using diarization (on raw 44.1kHz audio)
+        try:
+            audio_int16 = np.frombuffer(audio_bytes_44k, dtype=np.int16)
+            speaker_id = diarizer.identify_speaker(audio_int16, IN_SR)
+            if DEBUG: print(f"[DIARIZATION] Identified: {speaker_id}")
+        except Exception as e:
+            if DEBUG: print(f"[DIARIZATION] Failed: {e}")
+            speaker_id = "Human"
+
+        # Resample and transcribe
         x16 = resample_poly(x44, TARGET_SR, IN_SR).astype(np.float32)
         audio16 = x16 / 32768.0
         txt_out = stt_transcribe_16k_float(audio16)
@@ -409,21 +434,25 @@ def transcribe_and_speak_44k(audio_bytes_44k: bytes):
     def after():
         if txt_out:
             cur = txt.get("1.0","end").strip()
-            txt.insert("end", ("" if not cur else "\n") + txt_out + "\n")
+            # Display with speaker label
+            labeled_text = f"{speaker_id}: {txt_out}"
+            txt.insert("end", ("" if not cur else "\n") + labeled_text + "\n")
             txt.see("end")
             def worker():
                 global last_5_transcript
-                last_5_transcript += "Human: " + txt_out + "\n"
+                # Use speaker_id instead of hardcoded "Human"
+                last_5_transcript += f"{speaker_id}: " + txt_out + "\n"
                 text_val = asyncio.run(call_ai(last_5_transcript))  # waits for the async function to finish
-                last_5_transcript += "AI (You): " + text_val + "\n"
-                threading.Thread(target=play_tts, args=(text_val,), daemon=True).start()
-            
+                if text_val:
+                    last_5_transcript += "AI (You): " + text_val + "\n"
+                    threading.Thread(target=play_tts, args=(text_val,), daemon=True).start()
+
             threading.Thread(target=worker, daemon=True).start()
 
         else:
-            set_status("⚠️ No speech recognized.")
+            set_status("No speech recognized.")
         if state["listening"]:
-            set_status("🎤 Listening (VAD)…")
+            set_status("Listening (VAD)...")
     root.after(0, after)
 
 # =============== VAD worker (calibrated) ===============

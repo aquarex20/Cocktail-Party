@@ -9,4 +9,9 @@ dependencies = [
     "kokoro-onnx>=0.4.7",
     "loguru>=0.7.3",
     "ollama>=0.4.7",
+    # Speaker diarization dependencies (pinned for compatibility)
+    "speechbrain>=1.0.0",
+    "torch>=2.0.0,<2.5.0",
+    "torchaudio>=2.0.0,<2.5.0",
+    "scipy>=1.7.0",
 ]

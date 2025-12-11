@@ -1,16 +1,31 @@
 import sys
 import argparse
+import os
 
 from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model
 from loguru import logger
 from ollama import chat
 import requests
 import json
+import numpy as np
+
+# Add parent directory to path for speaker_diarization module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from speaker_diarization import SpeakerDiarizer
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 
 stt_model = get_stt_model()  # moonshine/base
 tts_model = get_tts_model()  # kokoro
+
+# Initialize speaker diarization
+logger.info("Initializing speaker diarization...")
+diarizer = SpeakerDiarizer(
+    similarity_threshold=0.35,  # Lower = more lenient matching (same speaker recognized)
+    max_speakers=10,            # For short audio, threshold is reduced by 30% automatically
+    device="cpu"  # Mac uses CPU (MPS has issues with SpeechBrain)
+)
+logger.info(f"Speaker diarization ready: {diarizer.is_ready()}")
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -58,10 +73,35 @@ def stream_llm_response(transcript: str):
 
 def echo(audio):
     global conversation
+
+    # Unpack audio tuple (sample_rate, audio_array)
+    sample_rate, audio_array = audio
+
+    # Debug audio format
+    logger.debug(f"Audio: sr={sample_rate}, shape={audio_array.shape}, dtype={audio_array.dtype}")
+    logger.debug(f"Diarizer ready: {diarizer.is_ready()}")
+
+    # Identify speaker using diarization
+    try:
+        # Flatten audio if needed (fastrtc may return 2D array)
+        if audio_array.ndim > 1:
+            audio_array = audio_array.flatten()
+
+        speaker_id, confidence, is_new = diarizer.identify_speaker_with_confidence(audio_array, sample_rate)
+        if is_new:
+            logger.debug(f"NEW speaker detected: {speaker_id}")
+        else:
+            logger.debug(f"Matched speaker: {speaker_id} (confidence: {confidence:.3f})")
+    except Exception as e:
+        logger.warning(f"Diarization failed, defaulting to 'User': {e}")
+        import traceback
+        traceback.print_exc()
+        speaker_id = "User"
+
     transcript = stt_model.stt(audio)
-    logger.debug(f"🎤 Transcript: {transcript}")
-    conversation+="\nUser:"+transcript
-    logger.debug("🧠 Starting streamed LLM response...")
+    logger.debug(f"[{speaker_id}] Transcript: {transcript}")
+    conversation += f"\n{speaker_id}: {transcript}"
+    logger.debug("Starting streamed LLM response...")
     text_buffer = ""
     ai_reply="AI:"
     # 1. Stream text from LLM as it’s generated
