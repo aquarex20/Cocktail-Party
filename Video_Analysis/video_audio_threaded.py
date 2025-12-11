@@ -294,70 +294,184 @@ class FaceTracker:
 
 
 class MouthMovementDetector:
-    """Detects mouth movement using MediaPipe Face Mesh."""
-    
+    """
+    Detects mouth movement using MediaPipe Face Mesh.
+
+    Uses the standard MAR (Mouth Aspect Ratio) algorithm with correct landmarks:
+    - Horizontal: landmarks 61 (left corner) and 291 (right corner)
+    - Vertical 1: landmarks 39 and 181
+    - Vertical 2: landmarks 0 and 17 (center top/bottom)
+    - Vertical 3: landmarks 269 and 405
+
+    MAR Formula: (N1 + N2 + N3) / (3 * D)
+    where N1, N2, N3 are vertical distances and D is horizontal distance.
+
+    Thresholds (based on research):
+    - MAR > 0.5: Mouth wide open (yawning)
+    - MAR > 0.3: Mouth open (talking)
+    - MAR < 0.3: Mouth closed
+    """
+
     def __init__(self):
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=5,
-            refine_landmarks=True,
+            refine_landmarks=True,  # Better accuracy for lips
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
         self.mouth_history: Dict[int, deque] = {}
-        self.history_length = 10
-    
-    def calculate_mouth_aspect_ratio(self, landmarks, frame_shape) -> float:
-        """Calculate mouth aspect ratio (MAR) to detect talking."""
-        h, w = frame_shape[:2]
-        
-        upper = landmarks[13]
-        lower = landmarks[14]
-        left = landmarks[61]
-        right = landmarks[291]
-        
-        upper_y = upper.y * h
-        lower_y = lower.y * h
-        left_x = left.x * w
-        right_x = right.x * w
-        
-        vertical = abs(lower_y - upper_y)
-        horizontal = abs(right_x - left_x)
-        
-        mar = vertical / (horizontal + 1e-6)
-        return mar
-    
-    def detect_talking(self, frame: np.ndarray, face: Face, threshold=0.05) -> bool:
-        """Detect if a person is talking based on mouth movement."""
-        x, y, w, h = face.bbox
-        
-        padding = 20
-        x1 = max(0, x - padding)
-        y1 = max(0, y - padding)
-        x2 = min(frame.shape[1], x + w + padding)
-        y2 = min(frame.shape[0], y + h + padding)
-        
-        face_roi = frame[y1:y2, x1:x2]
-        if face_roi.size == 0:
+        self.history_length = 15
+
+    def _euclidean_distance(self, p1, p2) -> float:
+        """Calculate Euclidean distance between two landmark points."""
+        return np.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+
+    def calculate_mouth_aspect_ratio(self, landmarks) -> float:
+        """
+        Calculate MAR using the standard 4-point formula.
+
+        MAR = (N1 + N2 + N3) / (3 * D)
+
+        Landmark pairs used:
+        - D (horizontal): 61 <-> 291 (mouth corners)
+        - N1 (vertical): 39 <-> 181
+        - N2 (vertical): 0 <-> 17 (center)
+        - N3 (vertical): 269 <-> 405
+
+        Returns: MAR value (typically 0.2-0.8 range)
+        """
+        # Horizontal distance (mouth width)
+        D = self._euclidean_distance(landmarks[61], landmarks[291])
+
+        # Three vertical distances
+        N1 = self._euclidean_distance(landmarks[39], landmarks[181])
+        N2 = self._euclidean_distance(landmarks[0], landmarks[17])
+        N3 = self._euclidean_distance(landmarks[269], landmarks[405])
+
+        # Avoid division by zero
+        if D < 1e-6:
+            return 0.0
+
+        MAR = (N1 + N2 + N3) / (3.0 * D)
+        return MAR
+
+    def calculate_inner_lip_distance(self, landmarks, frame_height: int) -> float:
+        """
+        Calculate simple pixel distance between inner lips (13 and 14).
+        This is a backup method - more intuitive threshold (in pixels).
+
+        Returns: Distance in pixels
+        """
+        upper = landmarks[13]  # Inner upper lip
+        lower = landmarks[14]  # Inner lower lip
+
+        # Convert normalized coordinates to pixels
+        distance = abs(lower.y - upper.y) * frame_height
+        return distance
+
+    def detect_talking(self, frame: np.ndarray, face: Face,
+                       mar_open_threshold=0.75,      # MAR > 0.75 = mouth open (adjusted for actual values)
+                       mar_talking_threshold=0.72,   # MAR > 0.72 with movement = talking
+                       pixel_threshold=8,            # Pixel distance > 8 = open
+                       variance_threshold=0.001,     # Adjusted for higher MAR range
+                       debug=True) -> bool:          # Enable debug output
+        """
+        Detect if a person is talking based on mouth movement.
+
+        Uses two complementary methods:
+        1. MAR (Mouth Aspect Ratio) - normalized, face-size independent
+        2. Pixel distance - simple and reliable backup
+
+        Args:
+            frame: Video frame (BGR format)
+            face: Face object with bounding box
+            mar_open_threshold: MAR threshold for "mouth is open" (default: 0.35)
+            mar_talking_threshold: Lower MAR + movement = talking (default: 0.25)
+            pixel_threshold: Pixel distance threshold (default: 12)
+            variance_threshold: MAR variance for detecting movement (default: 0.002)
+
+        Returns: True if talking detected, False otherwise
+        """
+        # Process full frame instead of ROI for better accuracy
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb_frame)
+
+        if not results.multi_face_landmarks:
             return False
-        
-        rgb_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
-        results = self.face_mesh.process(rgb_roi)
-        
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0].landmark
-            mar = self.calculate_mouth_aspect_ratio(landmarks, face_roi.shape)
-            
-            if face.id not in self.mouth_history:
-                self.mouth_history[face.id] = deque(maxlen=self.history_length)
-            
-            self.mouth_history[face.id].append(mar)
-            
-            if len(self.mouth_history[face.id]) >= 5:
-                variance = np.var(list(self.mouth_history[face.id]))
-                return variance > threshold
-        
-        return False
+
+        # Find the face mesh that corresponds to this face bbox
+        x, y, w, h = face.bbox
+        face_center_x = (x + w/2) / frame.shape[1]
+        face_center_y = (y + h/2) / frame.shape[0]
+
+        # Find closest face mesh to the detected face
+        best_mesh = None
+        best_dist = float('inf')
+
+        for face_landmarks in results.multi_face_landmarks:
+            # Use nose tip (landmark 1) as face center reference
+            nose = face_landmarks.landmark[1]
+            dist = (nose.x - face_center_x)**2 + (nose.y - face_center_y)**2
+            if dist < best_dist:
+                best_dist = dist
+                best_mesh = face_landmarks
+
+        if best_mesh is None:
+            return False
+
+        landmarks = best_mesh.landmark
+
+        # Calculate MAR
+        mar = self.calculate_mouth_aspect_ratio(landmarks)
+
+        # Calculate pixel distance (backup method)
+        pixel_dist = self.calculate_inner_lip_distance(landmarks, frame.shape[0])
+
+        # Initialize history for this face
+        if face.id not in self.mouth_history:
+            self.mouth_history[face.id] = deque(maxlen=self.history_length)
+
+        self.mouth_history[face.id].append(mar)
+        history = list(self.mouth_history[face.id])
+
+        # Debug output - print every 10 frames to see actual values
+        if debug and len(history) % 10 == 0:
+            variance = np.var(history[-5:]) if len(history) >= 5 else 0
+            mar_range = max(history[-5:]) - min(history[-5:]) if len(history) >= 5 else 0
+            print(f"[DEBUG] MAR={mar:.3f} | Pixels={pixel_dist:.1f} | Var={variance:.5f} | Range={mar_range:.3f}")
+
+        # Detection methods - VERY SENSITIVE
+        is_talking = False
+
+        # Method 1: MAR above open threshold
+        if mar > mar_open_threshold:
+            is_talking = True
+
+        # Method 2: Pixel distance above threshold
+        if pixel_dist > pixel_threshold:
+            is_talking = True
+
+        # Method 3: MAR above talking threshold + any movement
+        if len(history) >= 3 and mar > mar_talking_threshold:
+            variance = np.var(history[-5:] if len(history) >= 5 else history)
+            if variance > variance_threshold:
+                is_talking = True
+
+        # Method 4: Any recent change in MAR
+        if len(history) >= 2:
+            change = abs(history[-1] - history[-2])
+            if change > 0.03:  # Adjusted for higher MAR range
+                is_talking = True
+
+        # Method 5: Range of MAR values
+        if len(history) >= 3:
+            recent = history[-5:] if len(history) >= 5 else history
+            mar_range = max(recent) - min(recent)
+            if mar_range > 0.05:  # Adjusted for higher MAR range
+                is_talking = True
+
+        return is_talking
     
     def __del__(self):
         self.face_mesh.close()
