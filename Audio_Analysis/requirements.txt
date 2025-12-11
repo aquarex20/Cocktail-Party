@@ -6,3 +6,7 @@ sounddevice
 webrtcvad
 TTS
 faster-whisper
+# Speaker diarization dependencies
+speechbrain>=1.0.0
+torch>=2.0.0
+torchaudio>=2.0.0
