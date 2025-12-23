@@ -8,6 +8,9 @@ import requests
 import json
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
+import sounddevice as sd
+
+sd.default.device = ("BlackHole 2ch", 1)  # (input, output)
 
 stt_model = get_stt_model()  # moonshine/base
 tts_model = get_tts_model()  # kokoro

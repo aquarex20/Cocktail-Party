@@ -4,6 +4,9 @@ import sounddevice as sd
 import asyncio
 import numpy as np
 from pathlib import Path
+import sounddevice as sd
+
+sd.default.device = (None, "Script Config")  # (input, output)
 
 # Find kokoro model files
 def find_kokoro_models():
