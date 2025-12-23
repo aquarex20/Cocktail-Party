@@ -6,6 +6,7 @@ import numpy as np
 from pathlib import Path
 import sounddevice as sd
 
+#comment this if you havent used Script Config for your party
 sd.default.device = (None, "Script Config")  # (input, output)
 
 # Find kokoro model files

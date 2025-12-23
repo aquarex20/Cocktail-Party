@@ -67,7 +67,17 @@ python local_voice_chat_advanced.py
 Get a temporary phone number that anyone can call to interact with your AI:
 ```bash
 python local_voice_chat_advanced.py --phone
+
 ```
+### Blackhole config for party
+image.png
+open audio midi setup for mac or find an equivalent multi output device setting for non mac devices. 
+Create a new multi output device. 
+Select as Output devices in that new window: blackhole 2ch and your headphones or your desired output
+That's it. Adjust sample rate if necessary. 
+Call the multi-output device "Script Config" or anything else as long as you change the code for the local_party.py file for sd.default.device()
+For your sound output of your mac, be sure to select your "Script Config". 
+
 
 This will provide you with a temporary phone number that you can call to interact with the AI using your voice.
 
