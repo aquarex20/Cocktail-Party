@@ -27,6 +27,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 conversation="\nTranscript:\n "
 someone_talking = False
+full_send_it = False
+strikes=0
 last_voice_detected=0.0
 def stream_llm_response(transcript: str):
     """
@@ -48,7 +50,7 @@ def stream_llm_response(transcript: str):
             },
             {"role": "user", "content": transcript},
         ],
-        "options": {"num_predict": 150},
+        "options": {"num_predict": 300},
         "stream": True,
     }
 
@@ -68,52 +70,67 @@ def stream_llm_response(transcript: str):
             if chunk:
                 yield chunk
 
-def echo(audio):
+
+def talk():
     global conversation, someone_talking, last_voice_detected
-    transcript = stt_model.stt(audio)
-    logger.debug(f"🎤 Transcript: {transcript}")
-    conversation+="\nUser:"+transcript
-    logger.debug("🧠 Starting streamed LLM response...")
+    logger.debug("🧠 Starting to talk...")
     text_buffer = ""
     ai_reply="AI:"
-    # 1. Stream text from LLM as it’s generated
+    # 1. Stream text from LLM as it's generated
     for chunk in stream_llm_response(conversation):
         text_buffer += chunk
         ai_reply+=chunk
         if someone_talking:
-
-            return
+            break
         # Simple heuristic: speak when we see end of sentence or buffer big enough
         if any(p in text_buffer for p in [".", "!", "?"]) or (len(text_buffer) > 80 and text_buffer[-1]==","):
             speak_part = text_buffer
             text_buffer = ""
+            if someone_talking:
+                break
 
             logger.debug(f"🗣️ TTS on chunk: {speak_part!r}")
             # 2. Stream TTS for that chunk
             for audio_chunk in tts_model.stream_tts_sync(speak_part):
+                if someone_talking:
+                    break
                 yield audio_chunk
 
     # 3. Flush any remaining text once LLM is done
     text_buffer = text_buffer.strip()
     if someone_talking:
-        return
+        return False
 
     if text_buffer:
         ai_reply+=text_buffer
         logger.debug(f"🗣️ TTS on final chunk: {text_buffer!r}")
         for audio_chunk in tts_model.stream_tts_sync(text_buffer):
             if someone_talking:
-                return
+                break
             yield audio_chunk
     conversation+="\n"+ai_reply
 
+
+
+def echo(audio):
+    global conversation, someone_talking, last_voice_detected, full_send_it
+    if full_send_it:
+        full_send_it = False
+        yield from talk()
+    transcript = stt_model.stt(audio)
+    logger.debug(f"🎤 Transcript: {transcript}")
+    conversation+="\nUser:"+transcript
+    yield from talk()
 
 def create_stream():
     return Stream(ReplyOnPause(echo), modality="audio", mode="send-receive")
 
 
+# Flag to prevent multiple talk_direct calls
+ai_is_speaking = False
+
 def audio_callback(indata, frames, time, status):
-    global someone_talking, last_voice_detected
+    global someone_talking, last_voice_detected, strikes, full_send_it, ai_is_speaking, conversation
     """Process each audio chunk as it arrives."""
     if status:
         print(f"Status: {status}")
@@ -121,11 +138,35 @@ def audio_callback(indata, frames, time, status):
     audio_chunk = indata[:, 0]  # Get mono channel
     volume = np.sqrt(np.mean(audio_chunk**2))
     #print(f"Volume: {volume:.4f}")
-    if volume >= 0.0005:
+    if volume >= 0.00001:
         someone_talking = True
         last_voice_detected = time_module.time()
-    elif time_module.time() - last_voice_detected > 3:  # 2 second cooldown
+        #strikes+=1
+    else:
         someone_talking = False
+        # Trigger proactive speech after 2 seconds of silence
+        if time_module.time() - last_voice_detected > 2 and not ai_is_speaking and conversation!="\nTranscript:\n ":
+            ai_is_speaking = True
+            # Run in separate thread to not block audio callback
+            threading.Thread(target=proactive_speak, daemon=True).start()
+
+
+def proactive_speak():
+    """Wrapper to handle proactive speaking - iterates over talk() and plays each chunk."""
+    global ai_is_speaking, last_voice_detected
+    try:
+        logger.debug("🎙️ AI proactively speaking...")
+        for audio_chunk in talk():
+            # FastRTC returns tuples as (sample_rate, audio_data)
+            sample_rate, audio_data = audio_chunk
+            # Convert to float32 for sounddevice and ensure 1D
+            audio_data = np.asarray(audio_data, dtype=np.float32).flatten()
+            if audio_data.size > 0:
+                sd.play(audio_data, samplerate=int(sample_rate), blocking=True)
+        logger.debug("🎙️ Finished proactive speech")
+    finally:
+        ai_is_speaking = False
+        last_voice_detected = time_module.time()  # Reset timer after speaking
 
 def start_audio_monitor():
     """Run audio monitoring in a separate thread."""
@@ -141,6 +182,22 @@ def start_audio_monitor():
     return thread
 
 
+def start_conversation_printer():
+    """Print the conversation every 5 seconds in a separate thread."""
+    def printer_loop():
+        while not audio_monitor_stop.is_set():
+            print("\n" + "="*50)
+            print("📝 CONVERSATION:")
+            print("="*50)
+            print(conversation)
+            print("="*50 + "\n")
+            time_module.sleep(5)
+    
+    thread = threading.Thread(target=printer_loop, daemon=True)
+    thread.start()
+    return thread
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Local Voice Chat Advanced")
     parser.add_argument(
@@ -152,6 +209,9 @@ if __name__ == "__main__":
 
     # Start audio monitor in background thread
     monitor_thread = start_audio_monitor()
+    
+    # Start conversation printer in background thread
+    printer_thread = start_conversation_printer()
 
     stream = create_stream()
 
