@@ -34,7 +34,7 @@ def talk():
     ai_reply="AI:"
     alone= all(r.startswith("AI:") for r in extract_last_replies(conversation, 2))
     # 1. Stream text from LLM as it's generated
-    for chunk in stream_llm_response(conversation, alone=alone):
+    for chunk in stream_llm_response(conversation if not alone else extract_last_replies(conversation, 2), alone=alone):
         text_buffer += chunk
         ai_reply+=chunk
         if someone_talking:
