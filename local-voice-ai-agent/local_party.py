@@ -4,10 +4,13 @@ import sounddevice as sd
 import asyncio
 import numpy as np
 from pathlib import Path
-import sounddevice as sd
+import threading
 
 #comment this if you havent used Script Config for your party
 sd.default.device = (None, "Script Config")  # (input, output)
+
+# Global flag for stopping playback
+stop_playback = threading.Event()
 
 # Find kokoro model files
 def find_kokoro_models():
@@ -39,9 +42,62 @@ if not model_path or not voices_path:
 # Initialize kokoro
 kokoro = Kokoro(model_path, voices_path)
 
-# Voice assignments for AI1 and AI2
-AI1_VOICE = "if_sara"
-AI2_VOICE = "am_santa"
+# Default voice assignments for AIs
+DEFAULT_VOICES = {
+    "AI1": "if_sara",
+    "AI2": "am_santa",
+    "AI3": "bf_emma",
+    "AI4": "am_adam",
+}
+
+# Predefined dialogue options
+DIALOGUE_OPTIONS = {
+    "Custom (Edit below)": "",
+    "Cocktail Party Chat": """AI1: Hello sir, how are you doing?
+AI2: Howdy! I'm doing fine—how about you?
+AI1: Can't complain…
+AI2: Glad to hear that! Wow, this cocktail party is… something.
+AI1: It really is. Fancy lights, loud jazz, and drinks that look expensive.
+AI2: Speaking of which—confession—I don't like the alcohol here.
+AI1: Oh? Not a cocktail person?
+AI2: I like cocktails. I just don't like these cocktails.
+AI1: That's because they're cheap.
+AI2: Cheap?? At this event?
+AI1: Yeah. They blew the whole budget on the VR stand.""",
+    "Tech Interview": """AI1: So, tell me about your experience with Python.
+AI2: I've been coding in Python for about five years now.
+AI1: Interesting. What frameworks have you worked with?
+AI2: Mostly Django and FastAPI for backend work.
+AI1: And what about machine learning?
+AI2: I've done some work with PyTorch and scikit-learn.
+AI1: Great. Can you describe a challenging project you've worked on?
+AI2: Sure! I built a real-time speech recognition system last year.""",
+    "Weather Small Talk": """AI1: Beautiful day outside, isn't it?
+AI2: Absolutely! The sun is shining perfectly.
+AI1: I heard it might rain later though.
+AI2: Oh no, I didn't bring my umbrella!
+AI1: Don't worry, I have a spare one.
+AI2: You're a lifesaver! Thank you so much.""",
+    "Restaurant Order": """AI1: Welcome! Are you ready to order?
+AI2: Yes, I'll have the grilled salmon please.
+AI1: Excellent choice. Any sides with that?
+AI2: I'll take the roasted vegetables.
+AI1: And to drink?
+AI2: Just water for now, thank you.
+AI1: Perfect. Your order will be ready in about fifteen minutes.""",
+    "Group Discussion (4 AIs)": """AI1: Hey everyone, thanks for joining the meeting!
+AI2: Happy to be here. What's on the agenda?
+AI3: I think we're discussing the new project timeline.
+AI4: Right, we need to finalize the deadlines.
+AI1: Exactly. So the first milestone is due next Friday.
+AI2: That seems tight. Can we push it back a bit?
+AI3: I agree, we need more time for testing.
+AI4: What if we do a soft launch first?
+AI1: That's actually a great idea.
+AI2: I'm on board with that approach.
+AI3: Same here. Let's do it!
+AI4: Perfect, meeting adjourned!""",
+}
 
 # Get available voices for reference
 available_voices = kokoro.get_voices()
@@ -51,10 +107,13 @@ async def play_text_bubble(text, voice, speed=1.0, lang="en-us"):
     """
     Play a single text bubble using kokoro streaming.
     Collects all chunks first, then plays as one continuous audio.
+    Returns False if stopped, True if completed.
     """
+    if stop_playback.is_set():
+        return False
 
     if not text or not text.strip():
-        return
+        return True
     
     stream = kokoro.create_stream(
         text.strip(),
@@ -69,6 +128,8 @@ async def play_text_bubble(text, voice, speed=1.0, lang="en-us"):
     count = 0
     
     async for samples, sample_rate in stream:
+        if stop_playback.is_set():
+            return False
         count += 1
         all_samples.append(samples)
         final_sample_rate = sample_rate
@@ -86,19 +147,30 @@ async def play_text_bubble(text, voice, speed=1.0, lang="en-us"):
         # Use blocking=True for more reliable playback
         sd.play(full_audio, final_sample_rate, blocking=True)
         
-        # Small extra delay to ensure buffer is flushed
+        if stop_playback.is_set():
+            sd.stop()
+            return False
+    
+    return True
 
-def play_script(script_text, ai1_voice=None, ai2_voice=None, speed=1.0):
+def play_script(script_text, ai1_voice=None, ai2_voice=None, ai3_voice=None, ai4_voice=None, speed=1.0):
     """
     Parse the script and play each bubble separately with the appropriate voice.
-    Lines starting with 'AI1:' will use AI1 voice, 'AI2:' will use AI2 voice.
+    Lines starting with 'AI1:', 'AI2:', 'AI3:', 'AI4:' will use corresponding voices.
     """
-    if not script_text or not script_text.strip():
-        return "Please enter a script to play.", None
+    # Clear stop flag at start
+    stop_playback.clear()
     
-    # Use provided voices or defaults
-    voice1 = ai1_voice if ai1_voice else AI1_VOICE
-    voice2 = ai2_voice if ai2_voice else AI2_VOICE
+    if not script_text or not script_text.strip():
+        return "Please enter a script to play."
+    
+    # Build voice mapping
+    voices = {
+        "AI1": ai1_voice if ai1_voice else DEFAULT_VOICES["AI1"],
+        "AI2": ai2_voice if ai2_voice else DEFAULT_VOICES["AI2"],
+        "AI3": ai3_voice if ai3_voice else DEFAULT_VOICES["AI3"],
+        "AI4": ai4_voice if ai4_voice else DEFAULT_VOICES["AI4"],
+    }
     
     # Split script into lines
     lines = script_text.strip().split('\n')
@@ -110,87 +182,128 @@ def play_script(script_text, ai1_voice=None, ai2_voice=None, speed=1.0):
         if not line:
             continue
         
-        # Check if line starts with AI1: or AI2:
-        if line.startswith('AI1:'):
-            text_to_speak = line[4:].strip()  # Remove 'AI1:' prefix
-            if text_to_speak:
-                bubbles.append((text_to_speak, voice1))
-        
-        elif line.startswith('AI2:'):
-            text_to_speak = line[4:].strip()  # Remove 'AI2:' prefix
-            if text_to_speak:
-                bubbles.append((text_to_speak, voice2))
+        # Check for AI prefixes (AI1: through AI4:)
+        for ai_key in ["AI1", "AI2", "AI3", "AI4"]:
+            prefix = f"{ai_key}:"
+            if line.startswith(prefix):
+                text_to_speak = line[len(prefix):].strip()
+                if text_to_speak:
+                    bubbles.append((text_to_speak, voices[ai_key]))
+                break
     
     if not bubbles:
-        return "No valid AI1: or AI2: lines found in the script. Please format your script with 'AI1:' or 'AI2:' prefixes.", None
+        return "No valid AI lines found. Use prefixes like 'AI1:', 'AI2:', 'AI3:', or 'AI4:'"
     
     # Play each bubble sequentially
     try:
         status_messages = []
         for i, (text, voice) in enumerate(bubbles, 1):
+            if stop_playback.is_set():
+                return "\n".join(status_messages) + f"\n\n⏹ Stopped at bubble {i}/{len(bubbles)}"
             status_messages.append(f"Playing bubble {i}/{len(bubbles)}: {voice} - {text[:50]}...")
-            asyncio.run(play_text_bubble(text, voice, speed=speed))
+            completed = asyncio.run(play_text_bubble(text, voice, speed=speed))
+            if not completed:
+                return "\n".join(status_messages) + f"\n\n⏹ Stopped at bubble {i}/{len(bubbles)}"
         
-        return "\n".join(status_messages) + f"\n\n✓ Finished playing all {len(bubbles)} bubbles!", None
+        return "\n".join(status_messages) + f"\n\n✓ Finished playing all {len(bubbles)} bubbles!"
     
     except Exception as e:
-        return f"Error playing script: {str(e)}", None
+        return f"Error playing script: {str(e)}"
+
+def stop_script():
+    """Stop the currently playing script."""
+    stop_playback.set()
+    sd.stop()
+    return "⏹ Playback stopped"
+
+def on_dialogue_select(dialogue_name):
+    """Return the script text for the selected dialogue."""
+    return DIALOGUE_OPTIONS.get(dialogue_name, "")
 
 # Create Gradio interface
 with gr.Blocks(title="Dual Voice Script Player") as demo:
     gr.Markdown("# 🎭 Dual Voice Script Player")
-    gr.Markdown("Enter your script below. Use **AI1:** or **AI2:** prefixes to indicate which voice should read each line.")
-    gr.Markdown(f"**Available voices:** {', '.join(available_voices[:10])}{'...' if len(available_voices) > 10 else ''}")
+    gr.Markdown("Select a dialogue from the dropdown or write your own. Use **AI1:** or **AI2:** prefixes to indicate which voice should read each line.")
     
     with gr.Row():
         with gr.Column(scale=2):
+            # Dialogue selection dropdown
+            dialogue_dropdown = gr.Dropdown(
+                choices=list(DIALOGUE_OPTIONS.keys()),
+                value="Cocktail Party Chat",
+                label="📜 Select Dialogue",
+                interactive=True
+            )
+            
             script_input = gr.Textbox(
                 label="Script",
-                placeholder="AI1: Hello sir, how are you doing?\nAI2: Howdy! I’m doing fine—how about you?\nAI1: Can’t complain…\nAI2: Glad to hear that! Wow, this cocktail party is… something.\nAI1: It really is. Fancy lights, loud jazz, and drinks that look expensive.\nAI2: Speaking of which—confession—I don’t like the alcohol here.\nAI1: Oh? Not a cocktail person?\nAI2: I like cocktails. I just don’t like these cocktails.\nAI1: That’s because they’re cheap.\nAI2: Cheap?? At this event?\nAI1: Yeah. They blew the whole budget on the VR stand.\n\nAI2: Ah. That explains it.\nAI1: Look over there—see the VR corner?\nAI2: Oh wow. Leather couches. Neon glow. Triple-monitor setup.\nAI1: And inside the VR headsets? Managers. Executives. Directors.\nAI2: Of course.\nAI1: Meanwhile, all the interns are outside the VR stand, aggressively networking.\n\nAI2: I just saw one intern hand their business card to a ficus plant.\nAI1: Smart. That ficus is probably a VP.\nAI2: Another one is pretending to “casually” wait for the VR demo to end.\nAI1: They’ve been casually waiting for 45 minutes.\nAI2: Holding the same untouched cheap cocktail.\n\nAI1: Honestly, the drink tastes like sparkling regret.\nAI2: With notes of budget cuts.\nAI1: And a hint of “We promise exposure.”\nAI2: Meanwhile, inside the VR—\nAI1: “Welcome to our immersive vision for Q4 synergy.”\nAI2: Fully immersive. Unlike the alcohol.\n\nAI1: So yeah, if you don’t like the drinks—\nAI2: —it’s not your fault.\nAI1: It’s because they’re cheap.\nAI2: And because reality didn’t get enough funding this year.\n\nAI1: Cheers to that.\nAI2: Cheers. Let’s go network with the interns—or sneak into VR and become executives.",
-                lines=15,
-                value="AI1: Hello sir, how are you doing?\nAI2: Howdy! I’m doing fine—how about you?\nAI1: Can’t complain…\nAI2: Glad to hear that! Wow, this cocktail party is… something.\nAI1: It really is. Fancy lights, loud jazz, and drinks that look expensive.\nAI2: Speaking of which—confession—I don’t like the alcohol here.\nAI1: Oh? Not a cocktail person?\nAI2: I like cocktails. I just don’t like these cocktails.\nAI1: That’s because they’re cheap.\nAI2: Cheap?? At this event?\nAI1: Yeah. They blew the whole budget on the VR stand.\n\nAI2: Ah. That explains it.\nAI1: Look over there—see the VR corner?\nAI2: Oh wow. Leather couches. Neon glow. Triple-monitor setup.\nAI1: And inside the VR headsets? Managers. Executives. Directors.\nAI2: Of course.\nAI1: Meanwhile, all the interns are outside the VR stand, aggressively networking.\n\nAI2: I just saw one intern hand their business card to a ficus plant.\nAI1: Smart. That ficus is probably a VP.\nAI2: Another one is pretending to “casually” wait for the VR demo to end.\nAI1: They’ve been casually waiting for 45 minutes.\nAI2: Holding the same untouched cheap cocktail.\n\nAI1: Honestly, the drink tastes like sparkling regret.\nAI2: With notes of budget cuts.\nAI1: And a hint of “We promise exposure.”\nAI2: Meanwhile, inside the VR—\nAI1: “Welcome to our immersive vision for Q4 synergy.”\nAI2: Fully immersive. Unlike the alcohol.\n\nAI1: So yeah, if you don’t like the drinks—\nAI2: —it’s not your fault.\nAI1: It’s because they’re cheap.\nAI2: And because reality didn’t get enough funding this year.\n\nAI1: Cheers to that.\nAI2: Cheers. Let’s go network with the interns—or sneak into VR and become executives."
+                placeholder="AI1: Hello!\nAI2: Hi there!",
+                lines=12,
+                value=DIALOGUE_OPTIONS["Cocktail Party Chat"]
             )
             
             with gr.Row():
                 ai1_voice_dropdown = gr.Dropdown(
                     choices=available_voices,
-                    value=AI1_VOICE,
+                    value=DEFAULT_VOICES["AI1"],
                     label="AI1 Voice",
                     interactive=True
                 )
                 ai2_voice_dropdown = gr.Dropdown(
                     choices=available_voices,
-                    value=AI2_VOICE,
+                    value=DEFAULT_VOICES["AI2"],
                     label="AI2 Voice",
                     interactive=True
                 )
-                speed_slider = gr.Slider(
-                    minimum=0.5,
-                    maximum=2.0,
-                    value=1.0,
-                    step=0.1,
-                    label="Speed"
-                )
+            
+            # Optional AI3 & AI4 voices (collapsible)
+            with gr.Accordion("➕ More Voices (AI3, AI4)", open=False):
+                with gr.Row():
+                    ai3_voice_dropdown = gr.Dropdown(
+                        choices=available_voices,
+                        value=DEFAULT_VOICES["AI3"],
+                        label="AI3 Voice",
+                        interactive=True
+                    )
+                    ai4_voice_dropdown = gr.Dropdown(
+                        choices=available_voices,
+                        value=DEFAULT_VOICES["AI4"],
+                        label="AI4 Voice",
+                        interactive=True
+                    )
+            
+            speed_slider = gr.Slider(
+                minimum=0.5,
+                maximum=2.0,
+                value=1.0,
+                step=0.1,
+                label="Speed"
+            )
         
         with gr.Column(scale=1):
-            play_button = gr.Button("▶️ Play Script", variant="primary", size="lg")
+            with gr.Row():
+                play_button = gr.Button("▶️ Play", variant="primary", size="lg")
+                stop_button = gr.Button("⏹ Stop", variant="stop", size="lg")
             status_output = gr.Textbox(label="Status", interactive=False, lines=10)
     
-    # Example script
-    gr.Markdown("### Example Format:")
-    gr.Markdown("""
-    ```
-    AI1: Welcome to the dual voice script player!
-    AI2: Thank you for using our application.
-    AI1: You can create conversations between two AI voices.
-    AI2: Just prefix each line with AI1: or AI2: to choose the voice.
-    ```
-    """)
+    # Connect dialogue selection to script input
+    dialogue_dropdown.change(
+        fn=on_dialogue_select,
+        inputs=[dialogue_dropdown],
+        outputs=[script_input]
+    )
     
     # Connect the play button
     play_button.click(
         fn=play_script,
-        inputs=[script_input, ai1_voice_dropdown, ai2_voice_dropdown, speed_slider],
+        inputs=[script_input, ai1_voice_dropdown, ai2_voice_dropdown, ai3_voice_dropdown, ai4_voice_dropdown, speed_slider],
+        outputs=[status_output]
+    )
+    
+    # Connect the stop button
+    stop_button.click(
+        fn=stop_script,
+        inputs=[],
         outputs=[status_output]
     )
 
