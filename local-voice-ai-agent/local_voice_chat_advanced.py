@@ -9,7 +9,7 @@ import time as time_module  # rename to avoid conflict with callback's 'time' pa
 import sounddevice as sd
 from utilities import extract_transcript, extract_last_replies
 
-from llm_client import stream_llm_response
+from llm_client import stream_llm_response, get_llm_response
 
 # Global stop event for the audio monitor thread
 audio_monitor_stop = threading.Event()
@@ -27,14 +27,17 @@ someone_talking = False
 full_send_it = False
 strikes=0
 last_voice_detected=0.0
+last_summary_time=0
+summary="\nSummary:\n"
+
 def talk():
-    global conversation, someone_talking, last_voice_detected
+    global conversation, someone_talking, last_voice_detected, summary
     logger.debug("🧠 Starting to talk...")
     text_buffer = ""
     ai_reply="AI:"
     alone= all(r.startswith("AI:") for r in extract_last_replies(conversation, 2))
     # 1. Stream text from LLM as it's generated
-    for chunk in stream_llm_response(conversation if not alone else extract_last_replies(conversation, 2), alone=alone):
+    for chunk in stream_llm_response(summary+conversation if not alone else "\n".join(extract_last_replies(conversation, 2)), alone=alone):
         text_buffer += chunk
         ai_reply+=chunk
         if someone_talking:
@@ -86,8 +89,14 @@ def create_stream():
 # Flag to prevent multiple talk_direct calls
 ai_is_speaking = False
 
+def make_summary(): 
+    global conversation, summary
+    summary= get_llm_response(summary+conversation, summarize=True)
+    print("summary generated is "+ summary)
+    conversation = "\n".join(extract_last_replies(conversation, 10))
+
 def audio_callback(indata, frames, time, status):
-    global someone_talking, last_voice_detected, strikes, full_send_it, ai_is_speaking, conversation
+    global someone_talking, last_voice_detected, strikes, full_send_it, ai_is_speaking, conversation, last_summary_time
     """Process each audio chunk as it arrives."""
     if status:
         print(f"Status: {status}")
@@ -98,6 +107,12 @@ def audio_callback(indata, frames, time, status):
     if volume >= 0.00001:
         someone_talking = True
         last_voice_detected = time_module.time()
+        #summarization during user talking to not lose active speech time. 
+        if last_summary_time==0 : #replace to 10 instead of 5
+            last_summary_time=time_module.time()
+        if time_module.time() - last_summary_time > 15 and conversation!="\nTranscript:\n ": #replace to 10 instead of 5
+            last_summary_time = time_module.time()
+            make_summary()
         #strikes+=1
     else:
         someone_talking = False

@@ -9,21 +9,30 @@ Contains all utility functions for the local voice AI agent.
 # ============================================================================
 
 #Extract everything after "Transcript:" from the conversation
-def extract_transcript(conversation: str) -> str:
-    marker = "Transcript:\n"
-    idx = conversation.find(marker)
+def extract_transcript(text: str) -> str:
+    marker = "Transcript:"
+    idx = text.find(marker)
     if idx == -1:
         return ""
-    return conversation[idx + len(marker):]
+
+    line_end = text.find("\n", idx)
+    if line_end == -1:
+        return ""
+
+    return text[line_end + 1:]
 
 import re
 
-#Extract the last n replies from the transcript
 def extract_last_replies(transcript: str, n: int = 4) -> list[str]:
     pattern = r'(?:^|\n)(User:|AI:)(.*?)(?=\n(?:User:|AI:)|$)'
     matches = re.findall(pattern, transcript, flags=re.DOTALL)
 
-    replies = [speaker + content.strip() for speaker, content in matches]
+    replies = []
+    for speaker, content in matches:
+        content = content.rstrip("\n")          # don't kill leading spaces
+        content = content.lstrip(" ")           # normalize to single space style
+        replies.append(f"{speaker} {content}" if content else speaker)
+
     return replies[-n:]
 
 example_conversation = """
@@ -41,4 +50,3 @@ User: That sounds like a lot of work.
 AI: Yeah, it is. But it's also a lot of fun.
 """
 
-print(extract_last_replies(example_conversation, 3))
