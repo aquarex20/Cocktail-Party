@@ -45,12 +45,15 @@ def stream_llm_response(transcript: str):
                     "be chill and answer in a cool way. the "
                     "output will be converted to audio so don't include emojis "
                     "or special characters in your answers. Respond to what the "
-                    "user said in a creative and helpful way base yourself off of the conversation transcript in which AI represents you, User represents the User you have to reply to. DONT ANSWER WITH AI, directly speak what you need to speak. "
+                    "user said in a creative way base yourself off of the conversation transcript in which AI represents you,"
+                    "User represents the User you have to reply to."
+                    "DONT ANSWER WITH AI, directly speak what you need to speak. "
+                    "if you notice more than 2 times AI: it means the user isn't talking, then you should be intrigued and ask if someone's there."
                 ),
             },
             {"role": "user", "content": transcript},
         ],
-        "options": {"num_predict": 300},
+        "options": {"num_predict": 600},
         "stream": True,
     }
 
