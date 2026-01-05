@@ -4,15 +4,11 @@ import threading
 
 from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model
 from loguru import logger
-from ollama import chat
-import requests
-import json
 import numpy as np
 import time as time_module  # rename to avoid conflict with callback's 'time' param
-
-
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 import sounddevice as sd
+
+from llm_client import stream_llm_response
 
 # Global stop event for the audio monitor thread
 audio_monitor_stop = threading.Event()
@@ -30,50 +26,6 @@ someone_talking = False
 full_send_it = False
 strikes=0
 last_voice_detected=0.0
-def stream_llm_response(transcript: str):
-    """
-    [Unverified] Streams text chunks from Ollama /api/chat with stream=true.
-    Yields small pieces of text as they come.
-    """
-    payload = {
-        "model": "gemma3:4b",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a LLM in a WebRTC call simulationg a Cocktail Party. Your goal is to "
-                    "be chill and answer in a cool way. the "
-                    "output will be converted to audio so don't include emojis "
-                    "or special characters in your answers. Respond to what the "
-                    "user said in a creative way base yourself off of the conversation transcript in which AI represents you,"
-                    "User represents the User you have to reply to."
-                    "DONT ANSWER WITH AI, directly speak what you need to speak. "
-                    "if you notice more than 2 times AI: it means the user isn't talking, then you should be intrigued and ask if someone's there."
-                ),
-            },
-            {"role": "user", "content": transcript},
-        ],
-        "options": {"num_predict": 600},
-        "stream": True,
-    }
-
-    with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line:
-                continue
-            data = json.loads(line.decode("utf-8"))
-            # [Unverified] Streaming format – adjust if your actual JSON differs
-            chunk = ""
-            if "message" in data and "content" in data["message"]:
-                chunk = data["message"]["content"].replace("*","")
-            elif "delta" in data:
-                chunk = data["delta"].replace("*","")
-
-            if chunk:
-                yield chunk
-
-
 def talk():
     global conversation, someone_talking, last_voice_detected
     logger.debug("🧠 Starting to talk...")
