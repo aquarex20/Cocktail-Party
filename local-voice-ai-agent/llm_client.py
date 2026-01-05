@@ -24,8 +24,16 @@ COCKTAIL_PARTY_PROMPT = (
     "User represents the User you have to reply to. "
     "DONT ANSWER WITH AI, directly speak what you need to speak."
 )
-
-
+ALONE_PROMPT = (
+    "You are a LLM in a WebRTC call simulating a Cocktail Party."
+    "The output will be converted to audio so don't include emojis "
+    "or special characters in your answers. Don't start the answer with 'AI:' just speak." 
+    "Right now no one answered your last 2 replies, so you need to"
+    "Answer with a way to get the user to respond." 
+    "You should try to be funny and engaging to get the user to respond."
+    "We included your last 2 replies in the conversation transcript"
+    "for which you havent received a reply."
+)
 # ============================================================================
 # PAYLOAD BUILDERS
 # ============================================================================
@@ -53,7 +61,7 @@ def build_chat_payload(
 # LLM FUNCTIONS
 # ============================================================================
 
-def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT):
+def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT, alone: bool = False):
     """
     Streams text chunks from Ollama /api/chat with stream=true.
     Yields small pieces of text as they come.
@@ -65,7 +73,7 @@ def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PRO
     Yields:
         str: Text chunks as they arrive from the LLM
     """
-    payload = build_chat_payload(transcript, system_prompt=system_prompt)
+    payload = build_chat_payload(transcript, system_prompt=system_prompt if not alone else ALONE_PROMPT)
 
     with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
         r.raise_for_status()
