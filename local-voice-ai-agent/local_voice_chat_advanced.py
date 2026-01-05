@@ -1,14 +1,21 @@
 import sys
 import argparse
+import threading
 
 from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model
 from loguru import logger
 from ollama import chat
 import requests
 import json
+import numpy as np
+import time as time_module  # rename to avoid conflict with callback's 'time' param
+
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 import sounddevice as sd
+
+# Global stop event for the audio monitor thread
+audio_monitor_stop = threading.Event()
 
 #comment this if you want to use your own microphone with your own party
 sd.default.device = ("BlackHole 2ch", 1)  # (input, output)
@@ -19,7 +26,8 @@ tts_model = get_tts_model()  # kokoro
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 conversation="\nTranscript:\n "
-
+someone_talking = False
+last_voice_detected=0.0
 def stream_llm_response(transcript: str):
     """
     [Unverified] Streams text chunks from Ollama /api/chat with stream=true.
@@ -61,7 +69,7 @@ def stream_llm_response(transcript: str):
                 yield chunk
 
 def echo(audio):
-    global conversation
+    global conversation, someone_talking, last_voice_detected
     transcript = stt_model.stt(audio)
     logger.debug(f"🎤 Transcript: {transcript}")
     conversation+="\nUser:"+transcript
@@ -72,7 +80,9 @@ def echo(audio):
     for chunk in stream_llm_response(conversation):
         text_buffer += chunk
         ai_reply+=chunk
+        if someone_talking:
 
+            return
         # Simple heuristic: speak when we see end of sentence or buffer big enough
         if any(p in text_buffer for p in [".", "!", "?"]) or (len(text_buffer) > 80 and text_buffer[-1]==","):
             speak_part = text_buffer
@@ -85,16 +95,50 @@ def echo(audio):
 
     # 3. Flush any remaining text once LLM is done
     text_buffer = text_buffer.strip()
+    if someone_talking:
+        return
+
     if text_buffer:
         ai_reply+=text_buffer
         logger.debug(f"🗣️ TTS on final chunk: {text_buffer!r}")
         for audio_chunk in tts_model.stream_tts_sync(text_buffer):
+            if someone_talking:
+                return
             yield audio_chunk
     conversation+="\n"+ai_reply
 
 
 def create_stream():
     return Stream(ReplyOnPause(echo), modality="audio", mode="send-receive")
+
+
+def audio_callback(indata, frames, time, status):
+    global someone_talking, last_voice_detected
+    """Process each audio chunk as it arrives."""
+    if status:
+        print(f"Status: {status}")
+    
+    audio_chunk = indata[:, 0]  # Get mono channel
+    volume = np.sqrt(np.mean(audio_chunk**2))
+    #print(f"Volume: {volume:.4f}")
+    if volume >= 0.0005:
+        someone_talking = True
+        last_voice_detected = time_module.time()
+    elif time_module.time() - last_voice_detected > 3:  # 2 second cooldown
+        someone_talking = False
+
+def start_audio_monitor():
+    """Run audio monitoring in a separate thread."""
+    def monitor_loop():
+        with sd.InputStream(samplerate=16000, channels=1, callback=audio_callback):
+            logger.info("🎧 Audio monitor started...")
+            while not audio_monitor_stop.is_set():
+                sd.sleep(100)  # Check stop flag every 100ms
+            logger.info("🎧 Audio monitor stopped")
+    
+    thread = threading.Thread(target=monitor_loop, daemon=True)
+    thread.start()
+    return thread
 
 
 if __name__ == "__main__":
@@ -106,11 +150,18 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    # Start audio monitor in background thread
+    monitor_thread = start_audio_monitor()
+
     stream = create_stream()
 
-    if args.phone:
-        logger.info("Launching with FastRTC phone interface...")
-        stream.fastphone()
-    else:
-        logger.info("Launching with Gradio UI...")
-        stream.ui.launch()
+    try:
+        if args.phone:
+            logger.info("Launching with FastRTC phone interface...")
+            stream.fastphone()
+        else:
+            logger.info("Launching with Gradio UI...")
+            stream.ui.launch()
+    finally:
+        # Cleanup when done
+        audio_monitor_stop.set()
