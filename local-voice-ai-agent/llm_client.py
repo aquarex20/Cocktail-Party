@@ -34,6 +34,13 @@ ALONE_PROMPT = (
     "We included your last 2 replies in the conversation transcript"
     "for which you havent received a reply."
 )
+
+SUMMARY_PROMPT = (
+    "You are a summarization assistant. The user message contains a conversation transcript. "
+    "Summarize it into a concise summary of no more than 100 words. "
+    "Only output the summary text directly, no preamble or labels. "
+    "If the transcript is empty or has nothing meaningful, respond with an empty string."
+)
 # ============================================================================
 # PAYLOAD BUILDERS
 # ============================================================================
@@ -42,7 +49,7 @@ def build_chat_payload(
     user_content: str,
     system_prompt: str = COCKTAIL_PARTY_PROMPT,
     model: str = "gemma3:4b",
-    num_predict: int = 600,
+    num_predict: int = 300,
     stream: bool = True,
 ) -> dict:
     """Build a chat payload for Ollama API."""
@@ -91,7 +98,7 @@ def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PRO
                 yield chunk
 
 
-def get_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT) -> str:
+def get_llm_response(transcript: str, system_prompt: str = SUMMARY_PROMPT, summarize: bool = True) -> str:
     """
     Gets a complete (non-streaming) response from Ollama.
     
@@ -103,7 +110,7 @@ def get_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT
         str: The complete response text
     """
     payload = build_chat_payload(transcript, system_prompt=system_prompt, stream=False)
-    
+    print("payload is "+str(payload))
     response = requests.post(OLLAMA_URL, json=payload)
     response.raise_for_status()
     data = response.json()
