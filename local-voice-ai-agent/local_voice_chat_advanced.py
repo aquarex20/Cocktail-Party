@@ -22,8 +22,8 @@ tts_model = get_tts_model()  # kokoro
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-conversation="""\nTranscript:\n 
-AI: Hello sir, how are you doing?
+conversation="""\nTranscript:\n """
+example_conversation=""" AI: Hello sir, how are you doing?
 User: Uhh good. 
 AI: Awesome, do you like the party?
 User: Can't complain
