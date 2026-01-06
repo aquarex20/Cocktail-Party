@@ -23,17 +23,36 @@ def extract_transcript(text: str) -> str:
 
 import re
 
-def extract_last_replies(transcript: str, n: int = 4) -> list[str]:
-    pattern = r'(?:^|\n)(User:|AI:)(.*?)(?=\n(?:User:|AI:)|$)'
-    matches = re.findall(pattern, transcript, flags=re.DOTALL)
+import re
+
+def extract_last_replies(text: str, n: int = 4) -> list[str]:
+    # Matches lines that start with optional whitespace + optional quote + (User:|AI:)
+    # Captures the whole line only (no DOTALL needed)
+    pattern = r'^[ \t"]*(User:|AI:)[ \t"]*(.*)$'
+    matches = re.findall(pattern, text, flags=re.MULTILINE)
 
     replies = []
     for speaker, content in matches:
-        content = content.rstrip("\n")          # don't kill leading spaces
-        content = content.lstrip(" ")           # normalize to single space style
+        # Keep content as-is (except trimming trailing spaces)
+        content = content.rstrip()
         replies.append(f"{speaker} {content}" if content else speaker)
 
     return replies[-n:]
+def back_and_forth(transcript: str, n:int=4) -> str:
+    last = extract_last_replies(transcript, n)
+    if len(last) < n:
+        return False
+
+    prev = None
+    for r in last:
+        speaker = r.split(":", 1)[0]
+        if speaker not in ("AI", "User"):
+            return False
+        if prev is not None and speaker == prev:
+            return False
+        prev = speaker
+
+    return True
 
 example_conversation = """
 Transcript:

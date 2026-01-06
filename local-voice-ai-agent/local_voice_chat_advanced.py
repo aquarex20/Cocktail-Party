@@ -7,7 +7,7 @@ from loguru import logger
 import numpy as np
 import time as time_module  # rename to avoid conflict with callback's 'time' param
 import sounddevice as sd
-from utilities import extract_transcript, extract_last_replies
+from utilities import extract_transcript, extract_last_replies, back_and_forth
 
 from llm_client import stream_llm_response, get_llm_response
 
@@ -22,7 +22,14 @@ tts_model = get_tts_model()  # kokoro
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-conversation="\nTranscript:\n "
+conversation="""\nTranscript:\n 
+AI: Hello sir, how are you doing?
+User: Uhh good. 
+AI: Awesome, do you like the party?
+User: Can't complain
+AI: Glad to hear that! Wow, this cocktail party is… something.
+User: Maybe.  """
+
 someone_talking = False
 full_send_it = False
 strikes=0
@@ -35,9 +42,21 @@ def talk():
     logger.debug("🧠 Starting to talk...")
     text_buffer = ""
     ai_reply="AI:"
-    alone= all(r.startswith("AI:") for r in extract_last_replies(conversation, 2))
+    alone = all(r.startswith("AI:") for r in extract_last_replies(conversation, 2))
+    is_back_and_forth = back_and_forth(conversation, 6)  # 3 back and forths
+    
+    # Determine context to send
+    if alone:
+        context = "\n".join(extract_last_replies(conversation, 2))
+        #print("alone activated")
+    elif is_back_and_forth:
+        context = "\n".join(extract_last_replies(conversation, 6))
+    else:
+        print("summary activated")
+        context = summary + conversation
+    
     # 1. Stream text from LLM as it's generated
-    for chunk in stream_llm_response(summary+conversation if not alone else "\n".join(extract_last_replies(conversation, 2)), alone=alone):
+    for chunk in stream_llm_response(context, alone=alone, is_back_and_forth=is_back_and_forth):
         text_buffer += chunk
         ai_reply+=chunk
         if someone_talking:

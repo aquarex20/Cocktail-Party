@@ -22,7 +22,7 @@ COCKTAIL_PARTY_PROMPT = (
     "or special characters in your answers. Respond to what the "
     "user said in a creative way base yourself off of the conversation transcript in which AI represents you, "
     "User represents the User you have to reply to. "
-    "DONT ANSWER WITH AI, directly speak what you need to speak."
+    "DONT ANSWER WITH Ai:or User:, directly speak what you need to speak."
 )
 ALONE_PROMPT = (
     "You are a LLM in a WebRTC call simulating a Cocktail Party."
@@ -41,6 +41,18 @@ SUMMARY_PROMPT = (
     "Only output the summary text directly, no preamble or labels. "
     "If the transcript is empty or has nothing meaningful, respond with an empty string."
 )
+
+BACK_AND_FORTH_PROMPT = (
+    "You are a LLM in a WebRTC call simulating a Cocktail Party. "
+    "Your goal is to be interesting. The "
+    "output will be converted to audio so don't include emojis "
+    "or special characters in your answers."
+    "In the conversation transcript: AI represents you, "
+    "User represents the User you have to reply to. "
+    "DONT ANSWER WITH Ai: or User:, directly speak what you need to speak."
+    "try to comment on the perceived mood of User's replies while answering him/the subject of the conversation."
+)
+
 # ============================================================================
 # PAYLOAD BUILDERS
 # ============================================================================
@@ -68,7 +80,7 @@ def build_chat_payload(
 # LLM FUNCTIONS
 # ============================================================================
 
-def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT, alone: bool = False):
+def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PROMPT, alone: bool = False, is_back_and_forth: bool = False):
     """
     Streams text chunks from Ollama /api/chat with stream=true.
     Yields small pieces of text as they come.
@@ -80,7 +92,7 @@ def stream_llm_response(transcript: str, system_prompt: str = COCKTAIL_PARTY_PRO
     Yields:
         str: Text chunks as they arrive from the LLM
     """
-    payload = build_chat_payload(transcript, system_prompt=system_prompt if not alone else ALONE_PROMPT)
+    payload = build_chat_payload(transcript, system_prompt=ALONE_PROMPT if alone else BACK_AND_FORTH_PROMPT if is_back_and_forth else system_prompt)
 
     with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
         r.raise_for_status()
