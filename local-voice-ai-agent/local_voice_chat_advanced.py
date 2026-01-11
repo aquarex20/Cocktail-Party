@@ -10,6 +10,7 @@ import sounddevice as sd
 from utilities import extract_transcript, extract_last_replies, back_and_forth
 
 from llm_client import stream_llm_response, get_llm_response
+from diarization_client import init_diarization, get_speaker_label, record_speaker_text
 
 # Global stop event for the audio monitor thread
 audio_monitor_stop = threading.Event()
@@ -19,6 +20,9 @@ sd.default.device = ("BlackHole 2ch", 1)  # (input, output)
 
 stt_model = get_stt_model()  # moonshine/base
 tts_model = get_tts_model()  # kokoro
+
+# Initialize speaker diarization (non-blocking, fails gracefully)
+init_diarization()
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -98,7 +102,17 @@ def echo(audio):
         yield from talk()
     transcript = stt_model.stt(audio)
     logger.debug(f"🎤 Transcript: {transcript}")
-    conversation+="\nUser:"+transcript
+
+    # Get speaker label (non-blocking, may return None)
+    label = get_speaker_label(audio)
+
+    # Format with label if available
+    if label:
+        conversation += f"\nUser ({label}):" + transcript
+        record_speaker_text(label, transcript)
+    else:
+        conversation += "\nUser:" + transcript
+
     yield from talk()
 
 def create_stream():

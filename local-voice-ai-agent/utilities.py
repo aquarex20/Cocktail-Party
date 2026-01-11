@@ -26,16 +26,17 @@ import re
 import re
 
 def extract_last_replies(text: str, n: int = 4) -> list[str]:
-    # Matches lines that start with optional whitespace + optional quote + (User:|AI:)
-    # Captures the whole line only (no DOTALL needed)
-    pattern = r'^[ \t"]*(User:|AI:)[ \t"]*(.*)$'
+    # Matches lines that start with optional whitespace + optional quote + (User|AI) + optional (X) + :
+    # Handles both "User: hello" and "User (A): hello" formats
+    pattern = r'^[ \t"]*(User|AI)(?:\s*\([^)]+\))?:[ \t"]*(.*)$'
     matches = re.findall(pattern, text, flags=re.MULTILINE)
 
     replies = []
     for speaker, content in matches:
         # Keep content as-is (except trimming trailing spaces)
         content = content.rstrip()
-        replies.append(f"{speaker} {content}" if content else speaker)
+        # Format as "User: content" or "AI: content" (normalized without label)
+        replies.append(f"{speaker}: {content}" if content else f"{speaker}:")
 
     return replies[-n:]
 def back_and_forth(transcript: str, n:int=4) -> str:
@@ -45,7 +46,9 @@ def back_and_forth(transcript: str, n:int=4) -> str:
 
     prev = None
     for r in last:
-        speaker = r.split(":", 1)[0]
+        # Extract base speaker, handling both "User: text" and "User (A): text" formats
+        speaker_full = r.split(":", 1)[0]
+        speaker = speaker_full.split("(")[0].strip()
         if speaker not in ("AI", "User"):
             return False
         if prev is not None and speaker == prev:
