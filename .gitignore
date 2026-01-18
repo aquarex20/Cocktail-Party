@@ -86,3 +86,4 @@ lib/
 lib64
 .idea
 .venv
+.env
