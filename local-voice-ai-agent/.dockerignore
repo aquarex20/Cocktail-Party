@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+.venv
+venv
+.env
+*.egg-info
+.eggs
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Model files (downloaded at runtime)
+*.onnx
+*.bin
+*.safetensors
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+*.md
+!requirements.txt

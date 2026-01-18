@@ -1,0 +1,108 @@
+services:
+  # ============================================================================
+  # Ollama - Local LLM Server
+  # ============================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Ollama Model Puller - One-time model download
+  # ============================================================================
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-gemma3:4b}"]
+    profiles:
+      - setup
+
+  # ============================================================================
+  # Voice AI Application - Production
+  # ============================================================================
+  voice-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice-app
+    ports:
+      - "7860:7860"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3:4b}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - DOCKER_CONTAINER=true
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      # SSL configuration for HTTPS (required for microphone access)
+      - GRADIO_SSL_CERTFILE=/app/certs/cert.pem
+      - GRADIO_SSL_KEYFILE=/app/certs/key.pem
+    volumes:
+      - hf_cache:/home/voiceai/.cache/huggingface
+      - kokoro_cache:/home/voiceai/.cache/kokoro
+      - ./certs:/app/certs:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Voice AI Application - Development (with source mounting)
+  # ============================================================================
+  voice-app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice-app-dev
+    ports:
+      - "7860:7860"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3:4b}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - DOCKER_CONTAINER=true
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      # SSL configuration for HTTPS (required for microphone access)
+      - GRADIO_SSL_CERTFILE=/app/certs/cert.pem
+      - GRADIO_SSL_KEYFILE=/app/certs/key.pem
+    volumes:
+      - .:/app:ro
+      - hf_cache:/home/voiceai/.cache/huggingface
+      - kokoro_cache:/home/voiceai/.cache/kokoro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    profiles:
+      - dev
+
+volumes:
+  ollama_models:
+    name: ollama_models
+  hf_cache:
+    name: voice_ai_hf_cache
+  kokoro_cache:
+    name: voice_ai_kokoro_cache

@@ -7,5 +7,9 @@ wheels/
 *.egg-info
 .gradio/
 .env
+
 # Virtual environments
 .venv
+
+# SSL certificates (generated locally)
+certs/

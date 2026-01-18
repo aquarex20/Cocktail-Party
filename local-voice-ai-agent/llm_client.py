@@ -4,11 +4,13 @@ LLM Client Module
 Contains all payload definitions and functions for interacting with the local Ollama instance.
 """
 
+import os
 import requests
 import json
 from loguru import logger
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_URL = f"{OLLAMA_HOST}/api/chat"
 
 
 # ============================================================================
@@ -61,7 +63,7 @@ def build_chat_payload(
     user_content: str,
     system_prompt: str = COCKTAIL_PARTY_PROMPT,
     model: str = "gemma3:4b",
-    num_predict: int = 300,
+    num_predict: int = 100,
     stream: bool = True,
 ) -> dict:
     """Build a chat payload for Ollama API."""
