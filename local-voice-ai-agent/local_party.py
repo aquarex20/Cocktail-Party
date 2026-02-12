@@ -308,4 +308,8 @@ with gr.Blocks(title="Dual Voice Script Player") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    import argparse
+    parser = argparse.ArgumentParser(description="Dual Voice Script Player")
+    parser.add_argument("--port", type=int, default=None, help="Port for Gradio server (default: auto)")
+    args = parser.parse_args()
+    demo.launch(server_port=args.port)
