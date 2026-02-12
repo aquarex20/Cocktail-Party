@@ -1,21 +1,57 @@
 import sys
+import os
 import argparse
 import threading
+import subprocess
 
-from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model
+import gradio as gr
+from fastrtc import ReplyOnPause, Stream, WebRTC, get_stt_model, get_tts_model
 from loguru import logger
 import numpy as np
+from scipy import signal
 import time as time_module  # rename to avoid conflict with callback's 'time' param
 import sounddevice as sd
 from utilities import extract_transcript, extract_last_replies, back_and_forth
+
+TARGET_SAMPLE_RATE = 48000  # Mac speakers prefer 48kHz
+
+
+def get_device_lists():
+    """Return (input_devices, output_devices) as lists of (index, name)."""
+    devices = sd.query_devices()
+    inputs = []
+    outputs = []
+    for i, d in enumerate(devices):
+        if d["max_input_channels"] > 0:
+            inputs.append((i, d["name"]))
+        if d["max_output_channels"] > 0:
+            outputs.append((i, d["name"]))
+    return inputs, outputs
+
+
+def set_audio_devices(input_device=None, output_device=None):
+    """Set sounddevice default device. Accepts name (str) or index (int). Only applies when both are set."""
+    if input_device is not None and output_device is not None:
+        sd.default.device = (input_device, output_device)
+        logger.info(f"Audio devices set: input={input_device!r}, output={output_device!r}")
+
+def play_audio(audio_data, sample_rate):
+    """Play audio with resampling to target sample rate."""
+    audio_data = np.asarray(audio_data, dtype=np.float32).flatten()
+    if audio_data.size == 0:
+        return
+    # Resample if needed
+    if sample_rate != TARGET_SAMPLE_RATE:
+        audio_data = signal.resample(audio_data, int(len(audio_data) * TARGET_SAMPLE_RATE / sample_rate))
+    sd.play(audio_data, samplerate=TARGET_SAMPLE_RATE, blocking=True)
 
 from llm_client import stream_llm_response, get_llm_response
 
 # Global stop event for the audio monitor thread
 audio_monitor_stop = threading.Event()
 
-#comment this if you want to use your own microphone with your own party
-sd.default.device = ("BlackHole 2ch", 1)  # (input, output)
+# Audio input/output are set from CLI (--input-device / --output-device) when provided.
+# For the party setup: input = BlackHole 2ch (receives from local_party), output = your headphones/speakers.
 
 stt_model = get_stt_model()  # moonshine/base
 tts_model = get_tts_model()  # kokoro
@@ -31,7 +67,6 @@ AI: Glad to hear that! Wow, this cocktail party is… something.
 User: Maybe.  """
 
 someone_talking = False
-full_send_it = False
 strikes=0
 last_voice_detected=0.0
 last_summary_time=0
@@ -54,13 +89,15 @@ def talk():
     else:
         print("summary activated")
         context = summary + conversation
-    
+    if someone_talking:
+        return
+
     # 1. Stream text from LLM as it's generated
     for chunk in stream_llm_response(context, alone=alone, is_back_and_forth=is_back_and_forth):
         text_buffer += chunk
         ai_reply+=chunk
         if someone_talking:
-            break
+            return
         # Simple heuristic: speak when we see end of sentence or buffer big enough
         if any(p in text_buffer for p in [".", "!", "?"]) or (len(text_buffer) > 80 and text_buffer[-1]==","):
             speak_part = text_buffer
@@ -92,14 +129,29 @@ def talk():
 
 
 def echo(audio):
-    global conversation, someone_talking, last_voice_detected, full_send_it
-    if full_send_it:
-        full_send_it = False
-        yield from talk()
+    global conversation, someone_talking, last_voice_detected, ai_is_speaking
     transcript = stt_model.stt(audio)
     logger.debug(f"🎤 Transcript: {transcript}")
-    conversation+="\nUser:"+transcript
-    yield from talk()
+    conversation += "\nUser:" + transcript
+    
+    # Play via sd.play instead of yielding to FastRTC
+    ai_is_speaking = True
+    try:
+            
+        for audio_chunk in talk():
+            if someone_talking:
+                break
+            sample_rate, audio_data = audio_chunk
+            play_audio(audio_data, sample_rate)
+            if someone_talking:
+                break
+
+    finally:
+        ai_is_speaking = False
+    
+    # Yield nothing to FastRTC (required since it's a generator)
+    return
+    yield  # Makes this a generator that yields nothing
 
 def create_stream():
     return Stream(ReplyOnPause(echo), modality="audio", mode="send-receive")
@@ -110,12 +162,12 @@ ai_is_speaking = False
 
 def make_summary(): 
     global conversation, summary
-    summary= get_llm_response(summary+conversation, summarize=True)
+    #summary= get_llm_response(summary+conversation, summarize=True)
     print("summary generated is "+ summary)
     conversation = "\n".join(extract_last_replies(conversation, 10))
 
 def audio_callback(indata, frames, time, status):
-    global someone_talking, last_voice_detected, strikes, full_send_it, ai_is_speaking, conversation, last_summary_time
+    global someone_talking, last_voice_detected, ai_is_speaking, conversation, last_summary_time
     """Process each audio chunk as it arrives."""
     if status:
         print(f"Status: {status}")
@@ -129,7 +181,7 @@ def audio_callback(indata, frames, time, status):
         #summarization during user talking to not lose active speech time. 
         if last_summary_time==0 : #replace to 10 instead of 5
             last_summary_time=time_module.time()
-        if time_module.time() - last_summary_time > 15 and conversation!="\nTranscript:\n ": #replace to 10 instead of 5
+        if time_module.time() - last_summary_time > 100 and conversation!="\nTranscript:\n ": #replace to 10 instead of 5
             last_summary_time = time_module.time()
             make_summary()
         #strikes+=1
@@ -148,12 +200,8 @@ def proactive_speak():
     try:
         logger.debug("🎙️ AI proactively speaking...")
         for audio_chunk in talk():
-            # FastRTC returns tuples as (sample_rate, audio_data)
             sample_rate, audio_data = audio_chunk
-            # Convert to float32 for sounddevice and ensure 1D
-            audio_data = np.asarray(audio_data, dtype=np.float32).flatten()
-            if audio_data.size > 0:
-                sd.play(audio_data, samplerate=int(sample_rate), blocking=True)
+            play_audio(audio_data, sample_rate)
         logger.debug("🎙️ Finished proactive speech")
     finally:
         ai_is_speaking = False
@@ -189,30 +237,320 @@ def start_conversation_printer():
     return thread
 
 
+# Only set when user clicks "Start session" in the UI (so we don't start monitor twice)
+_session_started = False
+
+
+def _restart_audio_monitor():
+    """Stop the monitor, wait, then start it again (for after device change). Run in background."""
+    time_module.sleep(1.2)
+    audio_monitor_stop.clear()
+    start_audio_monitor()
+
+
+def _ui_apply_devices(input_name, output_name):
+    """Apply selected input/output devices. Called from Gradio. Restarts monitor if session is running."""
+    global _session_started
+    in_dev = None
+    out_dev = None
+    if input_name and str(input_name).strip() and str(input_name).strip() != SYSTEM_DEFAULT_LABEL:
+        in_dev = _parse_device(str(input_name).strip())
+    if output_name and str(output_name).strip() and str(output_name).strip() != SYSTEM_DEFAULT_LABEL:
+        out_dev = _parse_device(str(output_name).strip())
+    if in_dev is not None and out_dev is not None:
+        set_audio_devices(in_dev, out_dev)
+        if _session_started:
+            audio_monitor_stop.set()
+            threading.Thread(target=_restart_audio_monitor, daemon=True).start()
+            return "✅ Audio devices applied. Session was running; audio monitor is restarting with new devices."
+        return "✅ Audio devices applied."
+    return "⚠️ Select both input and output (not System default) to apply, or leave as-is to use system default."
+
+
+def _ui_start_session():
+    """Start the audio monitor and conversation printer. Called from Gradio."""
+    global _session_started
+    if _session_started:
+        return "✅ Session already running. Use the voice chat below."
+    _session_started = True
+    audio_monitor_stop.clear()
+    start_audio_monitor()
+    start_conversation_printer()
+    return "✅ Session started. You can use the voice chat below and hear the AI on your configured output."
+
+
+def _ui_stop_session():
+    """Stop the audio monitor and conversation printer. Called from Gradio."""
+    global _session_started
+    if not _session_started:
+        return "⚠️ Session was not running."
+    _session_started = False
+    audio_monitor_stop.set()
+    return "✅ Session stopped. You can change devices and start again."
+
+
+LOCAL_PARTY_PORT = 7861
+
+
+def _ui_run_local_party():
+    """Start local_party.py in the background for testing. Called from Gradio. Returns link."""
+    local_party_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_party.py")
+    if not os.path.isfile(local_party_path):
+        return f"❌ local_party.py not found at {local_party_path}"
+    try:
+        subprocess.Popen(
+            [sys.executable, local_party_path, "--port", str(LOCAL_PARTY_PORT)],
+            cwd=os.path.dirname(local_party_path),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        link = f"http://127.0.0.1:{LOCAL_PARTY_PORT}"
+        return f"✅ local_party.py started. **Open this link:** [{link}]({link}) — play a script there; you should hear it on the same output as this app."
+    except Exception as e:
+        return f"❌ Failed to start local_party.py: {e}"
+
+
+CONFIG_HELP_MD = """
+**Party + AI Chat setup**
+
+- **local_party.py** (Script Player) outputs to **Script Config** (multi-output: BlackHole 2ch + your headphones/speakers).
+- **This app** uses **BlackHole 2ch** as *input* and your **headphones/speakers** as *output*.
+
+Use the **same output device** for both so you hear the script and the AI in one place.
+"""
+
+TROUBLESHOOTING_MD = """
+**If you can't hear properly:**  
+1. Set your system sound output to your headphones/speakers.  
+2. In Audio MIDI Setup, ensure **Script Config** includes that same device.  
+3. Set this app's **Output device** above to that same device.
+"""
+
+
+SYSTEM_DEFAULT_LABEL = "— System default —"
+
+def build_ui():
+    """Build Gradio Blocks with config section + WebRTC voice chat."""
+    inputs_list, outputs_list = get_device_lists()
+    input_names = [name for _, name in inputs_list]
+    output_names = [name for _, name in outputs_list]
+    input_choices = [SYSTEM_DEFAULT_LABEL] + (input_names or ["(no input devices)"])
+    output_choices = [SYSTEM_DEFAULT_LABEL] + (output_names or ["(no output devices)"])
+
+    with gr.Blocks(title="Local Voice Chat Advanced", css=".gradio-container { max-width: 900px !important }") as demo:
+        gr.Markdown("# 🎤 Local Voice Chat Advanced")
+        gr.Markdown("Configure audio devices below, then start the session and use the voice chat.")
+
+        with gr.Accordion("🔧 Audio configuration", open=True):
+            gr.Markdown("Choose where to capture audio (e.g. **BlackHole 2ch** for the party) and where to play it (e.g. your **headphones/speakers**). Leave as *System default* to use system defaults.")
+            with gr.Row():
+                input_dropdown = gr.Dropdown(
+                    choices=input_choices,
+                    value=SYSTEM_DEFAULT_LABEL,
+                    label="Input device",
+                    allow_custom_value=True,
+                )
+                output_dropdown = gr.Dropdown(
+                    choices=output_choices,
+                    value=SYSTEM_DEFAULT_LABEL,
+                    label="Output device",
+                    allow_custom_value=True,
+                )
+            with gr.Row():
+                apply_btn = gr.Button("Apply devices", variant="secondary")
+                config_status = gr.Textbox(label="Status", interactive=False, value="")
+            apply_btn.click(
+                fn=_ui_apply_devices,
+                inputs=[input_dropdown, output_dropdown],
+                outputs=[config_status],
+            )
+
+        with gr.Accordion("🧪 Testing mode", open=False):
+            gr.Markdown(CONFIG_HELP_MD)
+            run_party_btn = gr.Button("Run local_party.py for testing", variant="secondary")
+            party_status = gr.Markdown(value="")
+            run_party_btn.click(fn=_ui_run_local_party, inputs=[], outputs=[party_status])
+            gr.Markdown(TROUBLESHOOTING_MD)
+
+        gr.Markdown("---")
+        gr.Markdown("### Start / Stop session")
+        gr.Markdown("Start the audio monitor (so the AI can react to room audio), then use the voice chat. Stop to change devices.")
+        with gr.Row():
+            start_btn = gr.Button("Start session", variant="primary")
+            stop_btn = gr.Button("Stop session", variant="stop")
+            session_status = gr.Textbox(label="Session", interactive=False, value="")
+        start_btn.click(fn=_ui_start_session, inputs=[], outputs=[session_status])
+        stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
+
+        gr.Markdown("---")
+        gr.Markdown("### Voice chat (WebRTC)")
+        with gr.Column():
+            audio = WebRTC(
+                mode="send-receive",
+                modality="audio",
+            )
+            audio.stream(
+                fn=ReplyOnPause(echo),
+                inputs=[audio],
+                outputs=[audio],
+            )
+
+    return demo
+
+
+def _parse_device(value):
+    """Parse device arg: int string -> int, else keep as str (device name)."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return value.strip()
+
+
+def _print_config_explanation():
+    """Print how local_party and advanced chat fit together."""
+    print("""
+================================================================================
+  AUDIO CONFIGURATION (Party + AI Chat)
+================================================================================
+
+  • local_party.py (Script Player)
+    Output: "Script Config" (multi-output device that sends audio to:
+            - BlackHole 2ch  (virtual cable)
+            - Your headphones/speakers (the same device you listen on)
+
+  • local_voice_chat_advanced.py (this app)
+    Input:  BlackHole 2ch (receives what the party sends + your mic if routed)
+    Output: Your headphones/speakers (so you hear the AI and the party together)
+
+  Both apps should use the SAME output device (your headphones/speakers) so you
+  hear the script and the AI in one place.
+
+  If you can't hear properly:
+  → Check your Mac (or system) sound output is set to your headphones/speakers.
+  → In Audio MIDI Setup, ensure "Script Config" includes that same device.
+  → Set this app's output (--output-device) to that same device.
+
+================================================================================
+""")
+
+
+def _run_testing_mode(args):
+    """
+    Interactive testing: explain config, list devices, optionally run local_party, then gate session start.
+    Returns (input_device, output_device) if user entered them; otherwise (None, None) so CLI args are used.
+    """
+    _print_config_explanation()
+
+    inputs, outputs = get_device_lists()
+    print("Available INPUT devices (use name or index for --input-device):")
+    for i, name in inputs:
+        print(f"  [{i}] {name}")
+    print("\nAvailable OUTPUT devices (use name or index for --output-device):")
+    for i, name in outputs:
+        print(f"  [{i}] {name}")
+
+    test_input_dev = None
+    test_output_dev = None
+    try:
+        inp = input("\nInput device (name or index, or Enter to use --input-device / default): ").strip()
+        test_input_dev = _parse_device(inp) if inp else None
+        out = input("Output device (name or index, or Enter to use --output-device / default): ").strip()
+        test_output_dev = _parse_device(out) if out else None
+    except EOFError:
+        pass
+
+    local_party_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_party.py")
+    if os.path.isfile(local_party_path):
+        try:
+            reply = input("\nRun local_party.py in the background to test audio? [y/N]: ").strip().lower()
+            if reply == "y" or reply == "yes":
+                subprocess.Popen(
+                    [sys.executable, local_party_path],
+                    cwd=os.path.dirname(local_party_path),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print("Started local_party.py. Use it to play a script; you should hear it on your output device.")
+        except EOFError:
+            pass
+    else:
+        print(f"\n(local_party.py not found at {local_party_path}; skip running it for testing.)")
+
+    print("\nIf you have sound issues, check:")
+    print("  • System output is your headphones/speakers.")
+    print("  • Script Config and this app use the SAME output device.")
+    print()
+    try:
+        input("Press Enter to start the voice chat session (or Ctrl+C to exit)...")
+    except EOFError:
+        pass
+
+    return (test_input_dev, test_output_dev)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Local Voice Chat Advanced")
+    parser = argparse.ArgumentParser(
+        description="Local Voice Chat Advanced",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Audio device configuration (optional):
+  Use --input-device and --output-device to set where to capture and play audio.
+  For the party setup: input = "BlackHole 2ch", output = your headphones/speakers.
+  Use --testing to list devices, get configuration help, and optionally run local_party.py.
+        """,
+    )
     parser.add_argument(
         "--phone",
         action="store_true",
         help="Launch with FastRTC phone interface (get a temp phone number)",
     )
+    parser.add_argument(
+        "--input-device",
+        type=str,
+        default=None,
+        metavar="NAME_OR_INDEX",
+        help="Audio input device (e.g. 'BlackHole 2ch' or index). Required for party setup.",
+    )
+    parser.add_argument(
+        "--output-device",
+        type=str,
+        default=None,
+        metavar="NAME_OR_INDEX",
+        help="Audio output device (e.g. your headphones name or index). Same as Script Config output.",
+    )
+    parser.add_argument(
+        "--testing",
+        action="store_true",
+        help="Testing mode: show config explanation, list devices, optionally run local_party.py, then start session.",
+    )
     args = parser.parse_args()
 
-    # Start audio monitor in background thread
-    monitor_thread = start_audio_monitor()
-    
-    # Start conversation printer in background thread
-    printer_thread = start_conversation_printer()
+    if args.testing:
+        test_input, test_output = _run_testing_mode(args)
+        input_dev = test_input if test_input is not None else _parse_device(args.input_device)
+        output_dev = test_output if test_output is not None else _parse_device(args.output_device)
+    else:
+        input_dev = _parse_device(args.input_device)
+        output_dev = _parse_device(args.output_device)
+    set_audio_devices(input_dev, output_dev)
 
-    stream = create_stream()
-
-    try:
-        if args.phone:
+    if args.phone:
+        # Phone mode: start monitor and printer immediately, use Stream's built-in UI
+        monitor_thread = start_audio_monitor()
+        printer_thread = start_conversation_printer()
+        stream = create_stream()
+        try:
             logger.info("Launching with FastRTC phone interface...")
             stream.fastphone()
-        else:
-            logger.info("Launching with Gradio UI...")
-            stream.ui.launch()
-    finally:
-        # Cleanup when done
-        audio_monitor_stop.set()
+        finally:
+            audio_monitor_stop.set()
+    else:
+        # Web UI: use custom Gradio app with config + WebRTC; monitor starts when user clicks "Start session"
+        demo = build_ui()
+        try:
+            logger.info("Launching with Gradio UI (config + voice chat)...")
+            demo.launch()
+        finally:
+            audio_monitor_stop.set()

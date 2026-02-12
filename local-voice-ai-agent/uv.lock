@@ -748,7 +748,6 @@ dependencies = [
     { name = "numpy" },
     { name = "ollama" },
     { name = "sounddevice" },
-    { name = "typer" },
 ]
 
 [package.metadata]
@@ -760,7 +759,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "ollama", specifier = ">=0.4.7" },
     { name = "sounddevice", specifier = ">=0.4.6" },
-    { name = "typer", specifier = ">=0.9.0" },
 ]
 
 [[package]]
