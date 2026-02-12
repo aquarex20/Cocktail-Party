@@ -3,6 +3,8 @@ import os
 import argparse
 import threading
 import subprocess
+import asyncio
+from pathlib import Path
 
 import gradio as gr
 from fastrtc import ReplyOnPause, Stream, WebRTC, get_stt_model, get_tts_model
@@ -14,6 +16,70 @@ import sounddevice as sd
 from utilities import extract_transcript, extract_last_replies, back_and_forth
 
 TARGET_SAMPLE_RATE = 48000  # Mac speakers prefer 48kHz
+
+# Language: "en" or "it". Set from UI or CLI; choose from the beginning.
+current_language = "en"
+
+# Lazy-loaded Kokoro for Italian TTS (voice if_sara, lang it)
+_kokoro_italian = None
+
+
+def _find_kokoro_models():
+    """Find kokoro model files (same logic as local_party)."""
+    current_dir = Path(__file__).resolve().parent
+    party_dir = current_dir.parent / "party"
+    for model_path, voices_path in [
+        (current_dir / "kokoro-v1.0.onnx", current_dir / "voices-v1.0.bin"),
+        (party_dir / "kokoro-v1.0.onnx", party_dir / "voices-v1.0.bin"),
+        (Path("kokoro-v1.0.onnx"), Path("voices-v1.0.bin")),
+    ]:
+        if model_path.exists() and voices_path.exists():
+            return str(model_path), str(voices_path)
+    return None, None
+
+
+def _get_kokoro_italian():
+    """Lazy-load Kokoro for Italian TTS. Returns None if models not found."""
+    global _kokoro_italian
+    if _kokoro_italian is not None:
+        return _kokoro_italian
+    model_path, voices_path = _find_kokoro_models()
+    if not model_path or not voices_path:
+        return None
+    try:
+        from kokoro_onnx import Kokoro
+        _kokoro_italian = Kokoro(model_path, voices_path)
+        return _kokoro_italian
+    except Exception as e:
+        logger.warning(f"Could not load Kokoro for Italian TTS: {e}")
+        return None
+
+
+def _stream_tts_sync(text, language):
+    """Yield (sample_rate, audio_array) chunks. Uses default TTS for English, Kokoro Italian for 'it'."""
+    if not text or not text.strip():
+        return
+    if language and language.lower() == "it":
+        kokoro = _get_kokoro_italian()
+        if kokoro is None:
+            logger.error("Italian TTS requested but Kokoro not available; skipping audio.")
+            return
+        async def _collect():
+            chunks = []
+            stream = kokoro.create_stream(text.strip(), voice="if_sara", lang="it")
+            async for samples, sample_rate in stream:
+                chunks.append((sample_rate, samples))
+            return chunks
+        try:
+            chunks = asyncio.run(_collect())
+        except Exception as e:
+            logger.error(f"Italian TTS failed: {e}")
+            return
+        for sr, audio in chunks:
+            yield (sr, audio)
+    else:
+        for chunk in tts_model.stream_tts_sync(text):
+            yield chunk
 
 
 def get_device_lists():
@@ -50,11 +116,76 @@ from llm_client import stream_llm_response, get_llm_response
 # Global stop event for the audio monitor thread
 audio_monitor_stop = threading.Event()
 
+# Serialise all playback so only one sd.play() runs at a time (avoids PortAudio -9986 / AUHAL conflicts on macOS)
+_playback_lock = threading.Lock()
+
 # Audio input/output are set from CLI (--input-device / --output-device) when provided.
 # For the party setup: input = BlackHole 2ch (receives from local_party), output = your headphones/speakers.
 
-stt_model = get_stt_model()  # moonshine/base
+# STT (transcript agent): default is Moonshine via fastrtc. It does NOT support Italian and has no
+# language parameter. For Italian we use an optional Whisper-based STT when available (see below).
+stt_model = get_stt_model()  # moonshine/base (English etc.; no Italian)
 tts_model = get_tts_model()  # kokoro
+
+# Optional Italian STT (Whisper). Lazy-loaded when current_language == "it".
+# Requires: pip install ".[italian-stt]" or pip install transformers torch torchaudio
+_stt_italian_model = None
+
+# Local cache for Whisper so the 967MB model is downloaded once and reused (no re-download each run)
+WHISPER_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "whisper")
+
+
+def _get_stt_for_language(lang):
+    """Return the STT model to use for the given language. Italian uses Whisper if available."""
+    global _stt_italian_model
+    if lang and str(lang).lower() == "it":
+        if _stt_italian_model is None:
+            try:
+                import torch
+                from transformers import pipeline
+                os.makedirs(WHISPER_CACHE_DIR, exist_ok=True)
+                # CPU (-1) on Mac; GPU (0) if CUDA available. Whisper small supports Italian.
+                device = 0 if torch.cuda.is_available() else -1
+                _stt_italian_model = pipeline(
+                    "automatic-speech-recognition",
+                    model="openai/whisper-small",
+                    device=device,
+                    model_kwargs={"cache_dir": WHISPER_CACHE_DIR},
+                )
+                logger.info(f"Loaded Whisper STT for Italian (language=it). Cache: {WHISPER_CACHE_DIR}")
+            except Exception as e:
+                logger.warning(
+                    f"Could not load Whisper for Italian STT: {e}. "
+                    "Install with: pip install '.[italian-stt]' (adds torch, torchaudio, transformers). Using default STT (English only)."
+                )
+                _stt_italian_model = False  # mark as "tried and failed"
+        if _stt_italian_model is not False and _stt_italian_model is not None:
+            return _stt_italian_model
+    return stt_model
+
+
+def _stt_transcribe(audio):
+    """Run STT on audio. Uses Italian Whisper when current_language is 'it' and available, else default STT."""
+    model = _get_stt_for_language(current_language)
+    if model is stt_model:
+        logger.debug("STT: using default (Moonshine) model.")
+        return model.stt(audio)
+    # Whisper pipeline: force Italian on every call via generate_kwargs
+    sample_rate, audio_array = audio
+    if hasattr(audio_array, "dtype") and audio_array.dtype == np.int16:
+        audio_array = audio_array.astype(np.float32) / 32768.0
+    audio_array = np.asarray(audio_array).flatten()
+    inp = {"array": audio_array, "sampling_rate": sample_rate}
+    # Pass language and task on each call so Whisper always transcribes in Italian
+    out = model(inp, generate_kwargs={"language": "it", "task": "transcribe"})
+    # Pipeline can return {"text": "..."} or list of segments
+    if isinstance(out, dict):
+        text = out.get("text")
+    elif isinstance(out, list) and out:
+        text = out[0].get("text") if isinstance(out[0], dict) else str(out[0])
+    else:
+        text = None
+    return (text or "").strip()
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -92,22 +223,24 @@ def talk():
     if someone_talking:
         return
 
-    # 1. Stream text from LLM as it's generated
-    for chunk in stream_llm_response(context, alone=alone, is_back_and_forth=is_back_and_forth):
+    # 1. Stream text from LLM as it's generated (language from current_language)
+    for chunk in stream_llm_response(
+        context, alone=alone, is_back_and_forth=is_back_and_forth, language=current_language
+    ):
         text_buffer += chunk
-        ai_reply+=chunk
+        ai_reply += chunk
         if someone_talking:
             return
         # Simple heuristic: speak when we see end of sentence or buffer big enough
-        if any(p in text_buffer for p in [".", "!", "?"]) or (len(text_buffer) > 80 and text_buffer[-1]==","):
+        if any(p in text_buffer for p in [".", "!", "?"]) or (len(text_buffer) > 80 and text_buffer[-1] == ","):
             speak_part = text_buffer
             text_buffer = ""
             if someone_talking:
                 break
 
             logger.debug(f"🗣️ TTS on chunk: {speak_part!r}")
-            # 2. Stream TTS for that chunk
-            for audio_chunk in tts_model.stream_tts_sync(speak_part):
+            # 2. Stream TTS for that chunk (English or Italian)
+            for audio_chunk in _stream_tts_sync(speak_part, current_language):
                 if someone_talking:
                     break
                 yield audio_chunk
@@ -118,9 +251,9 @@ def talk():
         return False
 
     if text_buffer:
-        ai_reply+=text_buffer
+        ai_reply += text_buffer
         logger.debug(f"🗣️ TTS on final chunk: {text_buffer!r}")
-        for audio_chunk in tts_model.stream_tts_sync(text_buffer):
+        for audio_chunk in _stream_tts_sync(text_buffer, current_language):
             if someone_talking:
                 break
             yield audio_chunk
@@ -128,30 +261,39 @@ def talk():
 
 
 
-def echo(audio):
-    global conversation, someone_talking, last_voice_detected, ai_is_speaking
-    transcript = stt_model.stt(audio)
-    logger.debug(f"🎤 Transcript: {transcript}")
-    conversation += "\nUser:" + transcript
-    
-    # Play via sd.play instead of yielding to FastRTC
-    ai_is_speaking = True
-    try:
-            
-        for audio_chunk in talk():
-            if someone_talking:
-                break
-            sample_rate, audio_data = audio_chunk
-            play_audio(audio_data, sample_rate)
-            if someone_talking:
-                break
+def _echo_work(audio):
+    """Runs in background: STT -> update conversation -> talk -> play. Kept off the generator to avoid timeout and 'generator already executing'."""
+    global conversation, ai_is_speaking
+    with _echo_lock:
+        try:
+            transcript = _stt_transcribe(audio)
+        except Exception as e:
+            logger.exception(f"STT failed: {e}")
+            return
+        if not (transcript and transcript.strip()):
+            logger.debug("🎤 Transcript empty, skipping response.")
+            return
+        logger.debug(f"🎤 Transcript: {transcript}")
+        conversation += "\nUser:" + transcript
+        ai_is_speaking = True
+        try:
+            for audio_chunk in talk():
+                if someone_talking:
+                    break
+                sample_rate, audio_data = audio_chunk
+                play_audio(audio_data, sample_rate)
+                if someone_talking:
+                    break
+        except Exception as e:
+            logger.exception(f"Talk/play failed: {e}")
+        finally:
+            ai_is_speaking = False
 
-    finally:
-        ai_is_speaking = False
-    
-    # Yield nothing to FastRTC (required since it's a generator)
-    return
-    yield  # Makes this a generator that yields nothing
+
+def echo(audio):
+    """Called by fastrtc each time the user stops speaking (ReplyOnPause). Yields immediately so fastrtc can accept the next turn; heavy work runs in a thread."""
+    threading.Thread(target=_echo_work, args=(audio,), daemon=True).start()
+    yield  # Must yield at least once so handler stays valid; avoids timeout and "generator already executing"
 
 def create_stream():
     return Stream(ReplyOnPause(echo), modality="audio", mode="send-receive")
@@ -160,10 +302,13 @@ def create_stream():
 # Flag to prevent multiple talk_direct calls
 ai_is_speaking = False
 
-def make_summary(): 
+# Serialize echo responses so we don't run STT+LLM+TTS concurrently from overlapping user turns
+_echo_lock = threading.Lock()
+
+def make_summary():
     global conversation, summary
-    #summary= get_llm_response(summary+conversation, summarize=True)
-    print("summary generated is "+ summary)
+    # summary = get_llm_response(summary+conversation, summarize=True, language=current_language)
+    print("summary generated is " + summary)
     conversation = "\n".join(extract_last_replies(conversation, 10))
 
 def audio_callback(indata, frames, time, status):
@@ -292,6 +437,16 @@ def _ui_stop_session():
 LOCAL_PARTY_PORT = 7861
 
 
+def _ui_apply_language(lang_choice):
+    """Set current language from UI. Called from Gradio (button or dropdown change)."""
+    global current_language
+    if lang_choice and "Italian" in str(lang_choice):
+        current_language = "it"
+        return "✅ Language set to **Italian**. AI, TTS and STT (Whisper) will use Italian."
+    current_language = "en"
+    return "✅ Language set to **English**. (Default setup.)"
+
+
 def _ui_run_local_party():
     """Start local_party.py in the background for testing. Called from Gradio. Returns link."""
     local_party_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_party.py")
@@ -364,6 +519,29 @@ def build_ui():
                 inputs=[input_dropdown, output_dropdown],
                 outputs=[config_status],
             )
+
+        with gr.Accordion("🌐 Language", open=True):
+            gr.Markdown("Choose the language for the AI and TTS. Set this **before** starting the session.")
+            with gr.Row():
+                language_dropdown = gr.Dropdown(
+                    choices=["English", "Italian"],
+                    value="Italian" if current_language == "it" else "English",
+                    label="Language",
+                )
+                apply_lang_btn = gr.Button("Apply language", variant="secondary")
+                language_status = gr.Markdown(value="")
+            apply_lang_btn.click(
+                fn=_ui_apply_language,
+                inputs=[language_dropdown],
+                outputs=[language_status],
+            )
+            # Update current_language as soon as user changes dropdown (so STT/TTS/LLM use it without clicking Apply)
+            language_dropdown.change(
+                fn=_ui_apply_language,
+                inputs=[language_dropdown],
+                outputs=[language_status],
+            )
+            gr.Markdown("*For Italian: the AI and TTS use Italian. Transcription (STT) uses Whisper when you have installed: `pip install transformers torch`; otherwise the default STT is used and may be poor for Italian.*")
 
         with gr.Accordion("🧪 Testing mode", open=False):
             gr.Markdown(CONFIG_HELP_MD)
@@ -525,7 +703,17 @@ Audio device configuration (optional):
         action="store_true",
         help="Testing mode: show config explanation, list devices, optionally run local_party.py, then start session.",
     )
+    parser.add_argument(
+        "--language",
+        type=str,
+        choices=["en", "it"],
+        default="en",
+        help="Language: 'en' (English) or 'it' (Italian). Set before starting; Italian uses Italian prompts and TTS.",
+    )
     args = parser.parse_args()
+
+    # Set language from CLI (UI can override after with Apply language)
+    current_language = args.language  # module-level; no global needed in __main__
 
     if args.testing:
         test_input, test_output = _run_testing_mode(args)
