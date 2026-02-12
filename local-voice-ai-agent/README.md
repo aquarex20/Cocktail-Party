@@ -40,6 +40,15 @@ source .venv/bin/activate
 uv sync
 ```
 
+**Optional – Italian speech-to-text:** If you use the Language setting **Italian**, install the optional Whisper-based STT so the app can transcribe Italian speech:
+
+```bash
+uv sync --extra italian-stt
+```
+
+Or with pip: `pip install ".[italian-stt]"` (installs `torch`, `torchaudio`, and `transformers`).  
+The first time you use Italian, the Whisper model (~967MB) is downloaded once and stored under `local-voice-ai-agent/.cache/whisper`; later runs reuse it and do not re-download.
+
 ### 4. Download required models in Ollama
 
 ```bash
@@ -67,18 +76,43 @@ python local_voice_chat_advanced.py
 Get a temporary phone number that anyone can call to interact with your AI:
 ```bash
 python local_voice_chat_advanced.py --phone
-
 ```
-### Blackhole config for party
-image.png
-open audio midi setup for mac or find an equivalent multi output device setting for non mac devices. 
-Create a new multi output device. 
-Select as Output devices in that new window: blackhole 2ch and your headphones or your desired output
-That's it. Adjust sample rate if necessary. 
-Call the multi-output device "Script Config" or anything else as long as you change the code for the local_party.py file for sd.default.device()
-For your sound output of your mac, be sure to select your "Script Config". 
 
-You can also feel free to comment the files added at the beginning of the files in which you see sd.default.device() if you're testing for real. 
+### Audio device configuration (optional)
+
+You can choose which audio input and output devices to use instead of relying on system defaults.
+
+- **Without options**: Uses your system default input/output (e.g. built-in mic and speakers).
+- **With options**: Set devices explicitly for the “party” setup (BlackHole + Script Config).
+
+Examples:
+```bash
+# Use BlackHole 2ch as input and device index 1 as output
+python local_voice_chat_advanced.py --input-device "BlackHole 2ch" --output-device 1
+
+# Testing mode: lists devices, explains config, can run local_party.py, then starts session
+python local_voice_chat_advanced.py --testing
+
+# Testing with devices pre-set
+python local_voice_chat_advanced.py --input-device "BlackHole 2ch" --output-device "Your Headphones" --testing
+```
+
+**Testing mode** (`--testing`): Runs a short setup flow that (1) explains how `local_party.py` and `local_voice_chat_advanced.py` share audio, (2) lists available input/output devices, (3) lets you type input/output device names or indices, (4) optionally starts `local_party.py` in the background so you can test that you hear both the script and the AI on the same output, and (5) reminds you to check system sound settings if something is wrong. After you press Enter, the voice chat session starts.
+
+**How the two apps fit together:**
+
+- **local_party.py** (Script Player) outputs to **Script Config** (a multi-output device that sends to **BlackHole 2ch** and to your **headphones/speakers**).
+- **local_voice_chat_advanced.py** takes **BlackHole 2ch** as *input* and your **headphones/speakers** as *output*.
+
+Use the **same output device** (your headphones/speakers) for both so you hear the script and the AI in one place. If you can’t hear properly, check:
+
+1. System sound output is set to your headphones/speakers.
+2. In Audio MIDI Setup, **Script Config** includes that same device.
+3. This app’s `--output-device` is set to that same device.
+
+### Blackhole config for party
+
+Open **Audio MIDI Setup** on Mac (or equivalent multi-output device settings elsewhere). Create a new **Multi-Output Device**. In that device, select as outputs: **BlackHole 2ch** and your **headphones** (or desired output). Name it **Script Config** (or anything you like, and update `sd.default.device` in `local_party.py` to match). Set your Mac’s sound output to **Script Config**. You can comment out the `sd.default.device` lines in both files if you prefer to use system default for testing. 
 
 This will provide you with a temporary phone number that you can call to interact with the AI using your voice.
 

@@ -9,3 +9,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Whisper model cache (downloaded when using Italian STT)
+.cache/
