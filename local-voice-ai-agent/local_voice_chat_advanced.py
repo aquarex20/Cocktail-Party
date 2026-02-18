@@ -19,6 +19,11 @@ from loguru import logger
 from audio_utils import get_device_lists, play_audio, set_audio_devices
 from conversation_mode import ConversationMode, compute_conversation_context
 from llm_client import stream_llm_response
+from party_manager import (
+    get_party_transcript,
+    run_internal_party,
+    stop_internal_party,
+)
 from voice_config import (
     CONFIG_HELP_MD,
     LOCAL_PARTY_PORT,
@@ -28,6 +33,7 @@ from voice_config import (
     parse_device,
     run_testing_mode,
 )
+from utilities import extract_last_replies
 from voice_models import get_available_voices, stream_tts_sync, stt_transcribe
 from webrtc_ui import add_voice_chat_block
 
@@ -333,6 +339,37 @@ def _ui_run_local_party():
         return f"❌ Failed to start local_party.py: {e}"
 
 
+def _ui_start_internal_party(num_agents, language, monitor_all, v1, v2, v3, v4):
+    """Start internal party (no Blackhole). v1..v4 are voice choices per agent."""
+    n = int(num_agents) if num_agents else 2
+    lang = "it" if language and "Italian" in str(language) else "en"
+    monitor = bool(monitor_all)
+
+    def _voice_or_none(v):
+        if not v or str(v).strip() == "Default":
+            return None
+        return str(v).strip()
+
+    voices = [_voice_or_none(v1), _voice_or_none(v2), _voice_or_none(v3), _voice_or_none(v4)]
+    try:
+        run_internal_party(num_agents=n, language=lang, tts_voices=voices[:n], monitor_all=monitor)
+        return f"✅ Internal party started with {n} agents. They will start talking to each other."
+    except Exception as e:
+        logger.exception(f"Failed to start internal party: {e}")
+        return f"❌ Failed: {e}"
+
+
+def _ui_stop_internal_party():
+    """Stop the internal party."""
+    stop_internal_party()
+    return "✅ Party stopped."
+
+
+def _ui_get_party_transcript():
+    """Return party transcript for the UI."""
+    return get_party_transcript()
+
+
 def build_ui():
     inputs_list, outputs_list = get_device_lists()
     input_names = [name for _, name in inputs_list]
@@ -342,73 +379,189 @@ def build_ui():
 
     with gr.Blocks(title="Local Voice Chat Advanced", css=".gradio-container { max-width: 900px !important }") as demo:
         gr.Markdown("# 🎤 Local Voice Chat Advanced")
-        gr.Markdown("Configure audio devices below, then start the session and use the voice chat.")
+        gr.Markdown("Choose a tab: **Single Agent** for one-on-one chat, **AI Party** to run multiple AIs talking to each other, or **Testing** for local_party.")
 
-        with gr.Accordion("🔧 Audio configuration", open=True):
-            gr.Markdown("Choose where to capture audio and where to play it.")
-            with gr.Row():
-                input_dropdown = gr.Dropdown(choices=input_choices, value=SYSTEM_DEFAULT_LABEL, label="Input device", allow_custom_value=True)
-                output_dropdown = gr.Dropdown(choices=output_choices, value=SYSTEM_DEFAULT_LABEL, label="Output device", allow_custom_value=True)
-            with gr.Row():
-                apply_btn = gr.Button("Apply devices", variant="secondary")
-                config_status = gr.Textbox(label="Status", interactive=False, value="")
-            apply_btn.click(fn=_ui_apply_devices, inputs=[input_dropdown, output_dropdown], outputs=[config_status])
+        with gr.Tabs():
+            # -----------------------------------------------------------------
+            # Tab 1: Single Agent
+            # -----------------------------------------------------------------
+            with gr.TabItem("Single Agent", id="single"):
+                gr.Markdown("### Single AI voice chat")
+                gr.Markdown("Configure audio devices below, then start the session and use the voice chat.")
 
-        with gr.Accordion("🌐 Language & TTS voice", open=True):
-            gr.Markdown("Choose the language for the AI and TTS. Set this **before** starting the session.")
-            with gr.Row():
-                language_dropdown = gr.Dropdown(choices=["English", "Italian"], value="Italian" if current_language == "it" else "English", label="Language")
-                apply_lang_btn = gr.Button("Apply language", variant="secondary")
-                language_status = gr.Markdown(value="")
-            voice_choices = ["Default"] + get_available_voices(current_language)
-            voice_dropdown = gr.Dropdown(
-                choices=voice_choices,
-                value="Default",
-                label="TTS voice (for current language)",
-                allow_custom_value=False,
-            )
-            apply_lang_btn.click(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
-            language_dropdown.change(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
-            voice_dropdown.change(fn=_ui_apply_voice, inputs=[voice_dropdown], outputs=[])
-            gr.Markdown("*Voice list is for the selected language. Change language to see voices for English or Italian. Default uses a built-in voice for that language.*")
-            gr.Markdown("*For Italian: the AI and TTS use Italian. Transcription (STT) uses Whisper when you have installed: `pip install transformers torch`; otherwise the default STT is used and may be poor for Italian.*")
+                with gr.Accordion("🔧 Audio configuration", open=True):
+                    gr.Markdown("Choose where to capture audio and where to play it.")
+                    with gr.Row():
+                        input_dropdown = gr.Dropdown(choices=input_choices, value=SYSTEM_DEFAULT_LABEL, label="Input device", allow_custom_value=True)
+                        output_dropdown = gr.Dropdown(choices=output_choices, value=SYSTEM_DEFAULT_LABEL, label="Output device", allow_custom_value=True)
+                    with gr.Row():
+                        apply_btn = gr.Button("Apply devices", variant="secondary")
+                        config_status = gr.Textbox(label="Status", interactive=False, value="")
+                    apply_btn.click(fn=_ui_apply_devices, inputs=[input_dropdown, output_dropdown], outputs=[config_status])
 
-        with gr.Accordion("🧪 Testing mode", open=False):
-            gr.Markdown(CONFIG_HELP_MD)
-            run_party_btn = gr.Button("Run local_party.py for testing", variant="secondary")
-            party_status = gr.Markdown(value="")
-            run_party_btn.click(fn=_ui_run_local_party, inputs=[], outputs=[party_status])
-            gr.Markdown(TROUBLESHOOTING_MD)
+                with gr.Accordion("🌐 Language & TTS voice", open=True):
+                    gr.Markdown("Choose the language for the AI and TTS. Set this **before** starting the session.")
+                    with gr.Row():
+                        language_dropdown = gr.Dropdown(choices=["English", "Italian"], value="Italian" if current_language == "it" else "English", label="Language")
+                        apply_lang_btn = gr.Button("Apply language", variant="secondary")
+                        language_status = gr.Markdown(value="")
+                    voice_choices = ["Default"] + get_available_voices(current_language)
+                    voice_dropdown = gr.Dropdown(
+                        choices=voice_choices,
+                        value="Default",
+                        label="TTS voice (for current language)",
+                        allow_custom_value=False,
+                    )
+                    apply_lang_btn.click(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
+                    language_dropdown.change(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
+                    voice_dropdown.change(fn=_ui_apply_voice, inputs=[voice_dropdown], outputs=[])
+                    gr.Markdown("*Voice list is for the selected language. Change language to see voices for English or Italian. Default uses a built-in voice for that language.*")
+                    gr.Markdown("*For Italian: the AI and TTS use Italian. Transcription (STT) uses Whisper when you have installed: `pip install transformers torch`; otherwise the default STT is used and may be poor for Italian.*")
 
-        gr.Markdown("---")
-        gr.Markdown("### Start / Stop session")
-        gr.Markdown("Click **Start session** to start the audio monitor and voice chat. Voice chat uses the **Input device** above if not system default (browser may ask for mic permission).")
-        with gr.Row():
-            start_btn = gr.Button("Start session", variant="primary")
-            stop_btn = gr.Button("Stop session", variant="stop")
-            session_status = gr.Textbox(label="Session", interactive=False, value="")
-        add_voice_chat_block(
-            echo,
-            _ui_start_session,
-            start_btn,
-            input_dropdown,
-            session_status,
-        )
-        stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
+                gr.Markdown("---")
+                gr.Markdown("### Start / Stop session")
+                gr.Markdown("Click **Start session** to start the audio monitor and voice chat. Voice chat uses the **Input device** above if not system default (browser may ask for mic permission).")
+                with gr.Row():
+                    start_btn = gr.Button("Start session", variant="primary")
+                    stop_btn = gr.Button("Stop session", variant="stop")
+                    session_status = gr.Textbox(label="Session", interactive=False, value="")
+                add_voice_chat_block(
+                    echo,
+                    _ui_start_session,
+                    start_btn,
+                    input_dropdown,
+                    session_status,
+                )
+                stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
 
-        gr.Markdown("---")
-        gr.Markdown("### 📝 Live transcript")
-        gr.Markdown("Conversation updates here as you speak and the AI replies.")
-        transcript_box = gr.Textbox(
-            label="Transcript",
-            value=_ui_get_transcript(),
-            lines=12,
-            max_lines=24,
-            interactive=False,
-            autoscroll=True,
-        )
-        transcript_timer = gr.Timer(value=1)
-        transcript_timer.tick(fn=_ui_get_transcript, inputs=[], outputs=[transcript_box])
+                gr.Markdown("---")
+                gr.Markdown("### 📝 Live transcript")
+                gr.Markdown("Conversation updates here as you speak and the AI replies.")
+                transcript_box = gr.Textbox(
+                    label="Transcript",
+                    value=_ui_get_transcript(),
+                    lines=12,
+                    max_lines=24,
+                    interactive=False,
+                    autoscroll=True,
+                )
+                transcript_timer = gr.Timer(value=1)
+                transcript_timer.tick(fn=_ui_get_transcript, inputs=[], outputs=[transcript_box])
+
+            # -----------------------------------------------------------------
+            # Tab 2: AI Party (internal routing, no Blackhole)
+            # -----------------------------------------------------------------
+            with gr.TabItem("AI Party", id="party"):
+                gr.Markdown("### 🎭 Create a party of AIs talking to each other")
+                gr.Markdown("""
+                **Internal routing** – no Blackhole or virtual audio devices. Audio frames are passed between agents in-process.
+
+                - Each agent: STT → LLM → TTS
+                - Agent A's TTS output is fed directly to Agent B's "mic" (and vice versa)
+                - Docker-friendly, works on any platform
+                """)
+
+                with gr.Accordion("Start Internal Party", open=True):
+                    with gr.Row():
+                        party_num_agents = gr.Dropdown(
+                            choices=["2", "3", "4"],
+                            value="2",
+                            label="Number of agents",
+                        )
+                        party_language = gr.Dropdown(
+                            choices=["English", "Italian"],
+                            value="English",
+                            label="Language",
+                        )
+                        party_monitor = gr.Checkbox(
+                            value=True,
+                            label="Monitor to headphones (hear all agents)",
+                        )
+                    voice_choices_en = ["Default"] + get_available_voices("en")
+                    voice_choices_it = ["Default"] + get_available_voices("it")
+
+                    def _party_voice_choices(lang):
+                        choices = voice_choices_it if lang and "Italian" in str(lang) else voice_choices_en
+                        upd = gr.update(choices=choices, value="Default")
+                        return upd, upd, upd, upd
+
+                    with gr.Row():
+                        party_voice_1 = gr.Dropdown(
+                            choices=voice_choices_en,
+                            value="Default",
+                            label="Agent 1 voice",
+                            allow_custom_value=False,
+                        )
+                        party_voice_2 = gr.Dropdown(
+                            choices=voice_choices_en,
+                            value="Default",
+                            label="Agent 2 voice",
+                            allow_custom_value=False,
+                        )
+                        party_voice_3 = gr.Dropdown(
+                            choices=voice_choices_en,
+                            value="Default",
+                            label="Agent 3 voice",
+                            allow_custom_value=False,
+                        )
+                        party_voice_4 = gr.Dropdown(
+                            choices=voice_choices_en,
+                            value="Default",
+                            label="Agent 4 voice",
+                            allow_custom_value=False,
+                        )
+                    party_language.change(
+                        fn=_party_voice_choices,
+                        inputs=[party_language],
+                        outputs=[party_voice_1, party_voice_2, party_voice_3, party_voice_4],
+                    )
+                    with gr.Row():
+                        start_party_btn = gr.Button("Start Internal Party", variant="primary")
+                        stop_party_btn = gr.Button("Stop Party", variant="stop")
+                    party_status = gr.Textbox(label="Status", interactive=False, value="")
+                    start_party_btn.click(
+                        fn=_ui_start_internal_party,
+                        inputs=[
+                            party_num_agents,
+                            party_language,
+                            party_monitor,
+                            party_voice_1,
+                            party_voice_2,
+                            party_voice_3,
+                            party_voice_4,
+                        ],
+                        outputs=[party_status],
+                    )
+                    stop_party_btn.click(fn=_ui_stop_internal_party, inputs=[], outputs=[party_status])
+
+                gr.Markdown("---")
+                gr.Markdown("### 📝 Party transcript")
+                party_transcript_box = gr.Textbox(
+                    label="Conversation",
+                    value="Start the party to see the conversation.",
+                    lines=14,
+                    max_lines=28,
+                    interactive=False,
+                    autoscroll=True,
+                )
+                party_transcript_timer = gr.Timer(value=1)
+                party_transcript_timer.tick(
+                    fn=_ui_get_party_transcript,
+                    inputs=[],
+                    outputs=[party_transcript_box],
+                )
+
+            # -----------------------------------------------------------------
+            # Tab 3: Testing
+            # -----------------------------------------------------------------
+            with gr.TabItem("Testing", id="testing"):
+                gr.Markdown("### 🧪 Testing mode")
+                with gr.Accordion("Run local_party.py for testing", open=True):
+                    gr.Markdown(CONFIG_HELP_MD)
+                    run_party_btn = gr.Button("Run local_party.py for testing", variant="secondary")
+                    party_status = gr.Markdown(value="")
+                    run_party_btn.click(fn=_ui_run_local_party, inputs=[], outputs=[party_status])
+                    gr.Markdown(TROUBLESHOOTING_MD)
 
     return demo
 
