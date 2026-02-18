@@ -17,8 +17,8 @@ from fastrtc import ReplyOnPause, Stream, WebRTC
 from loguru import logger
 
 from audio_utils import get_device_lists, play_audio, set_audio_devices
+from conversation_mode import ConversationMode, compute_conversation_context
 from llm_client import stream_llm_response
-from utilities import extract_last_replies, back_and_forth
 from voice_config import (
     CONFIG_HELP_MD,
     LOCAL_PARTY_PORT,
@@ -54,6 +54,8 @@ ai_is_speaking = False
 _session_started = False
 
 audio_monitor_stop = threading.Event()
+_audio_monitor_thread = None
+_conversation_printer_thread = None
 _playback_lock = threading.Lock()
 _echo_lock = threading.Lock()
 
@@ -70,23 +72,23 @@ _device_input_lock = threading.Lock()
 # -----------------------------------------------------------------------------
 def talk():
     global conversation, someone_talking, summary
+    if audio_monitor_stop.is_set() or not _session_started:
+        return
     logger.debug("🧠 Starting to talk...")
     text_buffer = ""
     ai_reply = "AI:"
-    alone = all(r.startswith("AI:") for r in extract_last_replies(conversation, 2))
-    is_back_and_forth = back_and_forth(conversation, 6)
 
-    if alone:
-        context = "\n".join(extract_last_replies(conversation, 2))
-    elif is_back_and_forth:
-        context = "\n".join(extract_last_replies(conversation, 6))
-    else:
+    ctx = compute_conversation_context(conversation, summary)
+    if ctx.wait_before_speaking_sec > 0:
+        time_module.sleep(ctx.wait_before_speaking_sec)
+    if ctx.mode == ConversationMode.COCKTAIL_PARTY:
         print("summary activated")
-        context = summary + conversation
     if someone_talking:
         return
 
-    for chunk in stream_llm_response(context, alone=alone, is_back_and_forth=is_back_and_forth, language=current_language):
+    for chunk in stream_llm_response(ctx.context, mode=ctx.mode, language=current_language):
+        if audio_monitor_stop.is_set() or not _session_started:
+            return
         text_buffer += chunk
         ai_reply += chunk
         if someone_talking:
@@ -98,8 +100,8 @@ def talk():
                 break
             logger.debug(f"🗣️ TTS on chunk: {speak_part!r}")
             for audio_chunk in stream_tts_sync(speak_part, current_language, voice=current_tts_voice):
-                if someone_talking:
-                    break
+                if someone_talking or audio_monitor_stop.is_set() or not _session_started:
+                    return
                 yield audio_chunk
 
     text_buffer = text_buffer.strip()
@@ -109,14 +111,16 @@ def talk():
         ai_reply += text_buffer
         logger.debug(f"🗣️ TTS on final chunk: {text_buffer!r}")
         for audio_chunk in stream_tts_sync(text_buffer, current_language, voice=current_tts_voice):
-            if someone_talking:
-                break
+            if someone_talking or audio_monitor_stop.is_set() or not _session_started:
+                return
             yield audio_chunk
     conversation += "\n" + ai_reply
 
 
 def _echo_work(audio):
     global conversation, ai_is_speaking
+    if audio_monitor_stop.is_set() or not _session_started:
+        return
     with _echo_lock:
         try:
             transcript = stt_transcribe(audio, current_language)
@@ -131,11 +135,11 @@ def _echo_work(audio):
         ai_is_speaking = True
         try:
             for audio_chunk in talk():
-                if someone_talking:
+                if someone_talking or audio_monitor_stop.is_set() or not _session_started:
                     break
                 sample_rate, audio_data = audio_chunk
                 play_audio(audio_data, sample_rate)
-                if someone_talking:
+                if someone_talking or audio_monitor_stop.is_set() or not _session_started:
                     break
         except Exception as e:
             logger.exception(f"Talk/play failed: {e}")
@@ -187,9 +191,13 @@ def audio_callback(indata, frames, time, status):
 
 def proactive_speak():
     global ai_is_speaking, last_voice_detected
+    if audio_monitor_stop.is_set() or not _session_started:
+        return
     try:
         logger.debug("🎙️ AI proactively speaking...")
         for audio_chunk in talk():
+            if audio_monitor_stop.is_set() or not _session_started:
+                break
             sample_rate, audio_data = audio_chunk
             play_audio(audio_data, sample_rate)
         logger.debug("🎙️ Finished proactive speech")
@@ -247,16 +255,6 @@ def start_audio_monitor(two_agent=False):
     return thread
 
 
-def start_two_agent_mode():
-    """Start monitor (device input -> queue) and worker (queue -> STT -> talk -> play). No proactive_speak."""
-    audio_monitor_stop.clear()
-    start_audio_monitor(two_agent=True)
-    worker = threading.Thread(target=_device_input_worker, daemon=True)
-    worker.start()
-    start_conversation_printer()
-    logger.info("Two-agent mode: listening on input device, responding to headphones + second output.")
-
-
 def start_conversation_printer():
     def printer_loop():
         while not audio_monitor_stop.is_set():
@@ -299,13 +297,13 @@ def _ui_apply_devices(input_name, output_name):
 
 
 def _ui_start_session():
-    global _session_started
+    global _session_started, _audio_monitor_thread, _conversation_printer_thread
     if _session_started:
         return "✅ Session already running. Use the voice chat below."
     _session_started = True
     audio_monitor_stop.clear()
-    start_audio_monitor()
-    start_conversation_printer()
+    _audio_monitor_thread = start_audio_monitor()
+    _conversation_printer_thread = start_conversation_printer()
     return "✅ Session started. You can use the voice chat below and hear the AI on your configured output."
 
 
@@ -315,6 +313,10 @@ def _ui_stop_session():
         return "⚠️ Session was not running."
     _session_started = False
     audio_monitor_stop.set()
+    # Wait for monitor and printer threads to exit (they check audio_monitor_stop)
+    for thread, name in [(_audio_monitor_thread, "audio monitor"), (_conversation_printer_thread, "conversation printer")]:
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
     return "✅ Session stopped. You can change devices and start again."
 
 
@@ -338,6 +340,11 @@ def _ui_apply_voice(voice_choice):
         current_tts_voice = None
     else:
         current_tts_voice = str(voice_choice).strip()
+
+
+def _ui_get_transcript():
+    """Return current conversation for the dashboard transcript UI."""
+    return conversation.strip() or "Transcript will appear here as you speak and the AI responds."
 
 
 def _ui_run_local_party():
@@ -415,6 +422,20 @@ def build_ui():
         stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
 
         gr.Markdown("---")
+        gr.Markdown("### 📝 Live transcript")
+        gr.Markdown("Conversation updates here as you speak and the AI replies.")
+        transcript_box = gr.Textbox(
+            label="Transcript",
+            value=_ui_get_transcript(),
+            lines=12,
+            max_lines=24,
+            interactive=False,
+            autoscroll=True,
+        )
+        transcript_timer = gr.Timer(value=1)
+        transcript_timer.tick(fn=_ui_get_transcript, inputs=[], outputs=[transcript_box])
+
+        gr.Markdown("---")
         gr.Markdown("### Voice chat (WebRTC)")
         with gr.Column():
             audio = WebRTC(mode="send-receive", modality="audio")
@@ -441,24 +462,6 @@ if __name__ == "__main__":
         output_dev = parse_device(args.output_device)
     set_audio_devices(input_dev, output_dev)
 
-    if getattr(args, "two_agent", False):
-        start_two_agent_mode()
-        try:
-            logger.info("Two-agent mode running. Press Ctrl+C to stop.")
-            while True:
-                time_module.sleep(1)
-        except KeyboardInterrupt:
-            audio_monitor_stop.set()
-    elif args.phone:
-        monitor_thread = start_audio_monitor()
-        printer_thread = start_conversation_printer()
-        stream = create_stream()
-        try:
-            logger.info("Launching with FastRTC phone interface...")
-            stream.fastphone()
-        finally:
-            audio_monitor_stop.set()
-    else:
         demo = build_ui()
         try:
             port = getattr(args, "port", None) or 7860
