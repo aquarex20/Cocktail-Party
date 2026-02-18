@@ -97,7 +97,6 @@ def _proactive_kick(agent: AgentRuntime, stop_event: threading.Event, speaker_lo
             if agent.monitor_output:
                 from audio_utils import play_audio
                 play_audio(audio_data, sr)
-        time_module.sleep(0.9)  # let last chunk drain before releasing lock
     except Exception as e:
         logger.exception(f"[Agent{agent.agent_id}] Proactive kick failed: {e}")
     finally:
