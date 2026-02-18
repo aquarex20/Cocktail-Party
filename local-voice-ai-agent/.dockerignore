@@ -1,0 +1,14 @@
+.venv
+__pycache__
+*.pyc
+.git
+third_party/BlackHole
+.cache
+
+# Blackhole-related (not needed for Docker - AI Party uses internal routing)
+party_setup.py
+scripts/blackhole_setup.sh
+
+# Kokoro models - downloaded during build (large files)
+kokoro-v1.0*.onnx
+voices-v1.0.bin

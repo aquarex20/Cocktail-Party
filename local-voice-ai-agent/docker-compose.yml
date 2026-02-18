@@ -1,0 +1,14 @@
+# Docker Compose for Local Voice Chat Advanced + Party Manager
+# Includes Kokoro TTS voices. AI Party uses internal routing (no Blackhole).
+# Single Agent: WebRTC voice chat via browser. AI Party: agents talk in-process.
+
+services:
+  voice-chat:
+    build: .
+    ports:
+      - "7860:7860"
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal}
+    # Optional: mount Ollama if running locally
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
