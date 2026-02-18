@@ -20,6 +20,7 @@ from audio_utils import get_device_lists, play_audio, set_audio_devices
 from conversation_mode import ConversationMode, compute_conversation_context
 from llm_client import stream_llm_response
 from party_manager import (
+    get_agent_states,
     get_party_transcript,
     run_internal_party,
     stop_internal_party,
@@ -365,9 +366,126 @@ def _ui_stop_internal_party():
     return "✅ Party stopped."
 
 
+def _ui_start_party_with_scene(num_agents, language, monitor_all, v1, v2, v3, v4):
+    """Start party and return (status, static_html, dynamic_html). Both are the full scene."""
+    status = _ui_start_internal_party(num_agents, language, monitor_all, v1, v2, v3, v4)
+    n = int(num_agents) if num_agents else 2
+    full = _ui_render_party_full(n, get_agent_states())
+    return status, full, full
+
+
+def _ui_stop_party_with_scene():
+    """Stop party and return (status, static_html, dynamic_html). Both are the full scene."""
+    status = _ui_stop_internal_party()
+    full = _ui_render_party_full(0, [])
+    return status, full, full
+
+
 def _ui_get_party_transcript():
     """Return party transcript for the UI."""
     return get_party_transcript()
+
+
+# Cache for dynamic full scene
+_party_dynamic_cache = {"state_key": None, "html": None}
+
+
+def _party_char_positions(n: int):
+    """Return (x, y) % for each of n chars around the table."""
+    import math
+    radius = 38
+    return [
+        (50 + radius * math.cos(math.radians(i * (360 / n) - 90)),
+         50 + radius * math.sin(math.radians(i * (360 / n) - 90)))
+        for i in range(n)
+    ]
+
+
+def _ui_render_party_full(n_agents: int, states):
+    """Render the FULL party scene: background, table, avatars, names, thinking, ring. Everything."""
+    if n_agents == 0:
+        return """
+        <div class="party-scene" style="
+            width: 100%; min-height: 500px; height: 500px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border-radius: 16px; display: flex; align-items: center; justify-content: center;
+            font-family: system-ui, sans-serif; color: #94a3b8;">
+            <p>Start the party to see the characters.</p>
+        </div>
+        """
+    cocktails = ["🍸", "🍹", "🥃", "🍷"]
+    avatars = ["🧑‍💼", "👩‍💼", "🧑‍🎨", "👩‍🎨"]
+    names = ["Sage", "Maverick", "Luna", "Cosmo"]
+    positions = _party_char_positions(n_agents)
+    state_by_id = {s["agent_id"]: s for s in (states or [])}
+    cocktail_row = "".join(
+        f'<span style="font-size: 24px; margin: 0 8px;">{c}</span>' for c in cocktails[:n_agents]
+    )
+    chars_html = []
+    for i in range(n_agents):
+        x, y = positions[i]
+        aid = i + 1
+        s = state_by_id.get(aid, {})
+        thinking_vis = "visible" if s.get("is_thinking") else "hidden"
+        border_vis = "visible" if s.get("is_speaking") else "hidden"
+        chars_html.append(f"""
+            <div class="party-char" data-agent-id="{aid}" style="
+                position: absolute; left: {x}%; top: {y}%; transform: translate(-50%, -50%);
+                text-align: center; z-index: 5;">
+                <div class="thinking-bubble" style="
+                    visibility: {thinking_vis}; height: 32px; display: flex; align-items: center; justify-content: center;
+                    font-size: 20px; animation: think-spin 1s linear infinite;">💭</div>
+                <div class="avatar" style="
+                    width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(145deg, #334155, #1e293b);
+                    display: flex; align-items: center; justify-content: center; font-size: 28px;
+                    border: 3px solid #475569; margin: 0 auto; box-sizing: border-box;
+                    box-shadow: {"0 0 20px rgba(34,197,94,0.6)" if s.get("is_speaking") else "none"};
+                    border-color: {"#22c55e" if s.get("is_speaking") else "#475569"};">
+                    {avatars[i % len(avatars)]}
+                </div>
+                <div class="name" style="
+                    margin-top: 6px; font-size: 12px; font-weight: 600; color: #e2e8f0;">
+                    {names[i % len(names)]}
+                </div>
+            </div>
+        """)
+    return f"""
+    <style>
+        @keyframes think-spin {{
+            0% {{ transform: scale(1) rotate(0deg); }}
+            50% {{ transform: scale(1.15) rotate(5deg); }}
+            100% {{ transform: scale(1) rotate(0deg); }}
+        }}
+    </style>
+    <div class="party-scene" style="
+        width: 100%; height: 500px; min-height: 500px; position: relative;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border-radius: 16px; overflow: hidden; font-family: system-ui, sans-serif;">
+        <div style="
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: 55%; height: 45%; background: linear-gradient(180deg, #422006 0%, #78350f 50%, #451a03 100%);
+            border-radius: 50% / 45%; box-shadow: inset 0 4px 20px rgba(0,0,0,0.4), 0 8px 32px rgba(0,0,0,0.3);
+            border: 4px solid #92400e; display: flex; align-items: center; justify-content: center;">
+            <div style="text-align: center;">
+                <div style="margin-bottom: 8px;">{cocktail_row}</div>
+                <span style="font-size: 11px; color: #a78bfa;">Cocktails</span>
+            </div>
+        </div>
+        {''.join(chars_html)}
+    </div>
+    """
+
+
+def _ui_render_party_dynamic():
+    """Return full scene with current states. Timer updates this. Same as static, just updated."""
+    states = get_agent_states()
+    state_key = tuple((s["agent_id"], s["is_speaking"], s["is_thinking"]) for s in states) if states else ()
+    if state_key == _party_dynamic_cache["state_key"] and _party_dynamic_cache["html"]:
+        return _party_dynamic_cache["html"]
+    n = len(states) if states else 0
+    html = _ui_render_party_full(n, states)
+    _party_dynamic_cache["state_key"] = state_key
+    _party_dynamic_cache["html"] = html
+    return html
 
 
 def build_ui():
@@ -377,7 +495,17 @@ def build_ui():
     input_choices = [SYSTEM_DEFAULT_LABEL] + (input_names or ["(no input devices)"])
     output_choices = [SYSTEM_DEFAULT_LABEL] + (output_names or ["(no output devices)"])
 
-    with gr.Blocks(title="Local Voice Chat Advanced", css=".gradio-container { max-width: 900px !important }") as demo:
+    with gr.Blocks(
+        title="Local Voice Chat Advanced",
+        css="""
+        .gradio-container { max-width: 900px !important }
+        /* Party scene: static and dynamic are identical full scenes, stacked. Dynamic overlays static. */
+        #party_scene_wrapper { position: relative !important; min-height: 500px !important; height: 500px !important; overflow: hidden !important; }
+        #party_scene_wrapper > div { padding: 0 !important; overflow: hidden !important; }
+        #party_scene_wrapper > div:first-child { height: 500px !important; overflow: hidden !important; }
+        #party_scene_wrapper > div:last-child { position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; width: 100% !important; height: 500px !important; overflow: hidden !important; }
+        """,
+    ) as demo:
         gr.Markdown("# 🎤 Local Voice Chat Advanced")
         gr.Markdown("Choose a tab: **Single Agent** for one-on-one chat, **AI Party** to run multiple AIs talking to each other, or **Testing** for local_party.")
 
@@ -460,6 +588,24 @@ def build_ui():
                 - Agent A's TTS output is fed directly to Agent B's "mic" (and vice versa)
                 - Docker-friendly, works on any platform
                 """)
+                gr.Markdown("### 🎪 Party scene")
+                gr.Markdown("Characters around the table. A 💭 thinking indicator appears above their head when they have the floor and are processing (LLM). Green border = speaking.")
+                with gr.Column(elem_id="party_scene_wrapper"):
+                    party_scene_static = gr.HTML(
+                        value=_ui_render_party_full(0, []),
+                        elem_id="party_scene_static",
+                    )
+                    party_scene_dynamic = gr.HTML(
+                        value=_ui_render_party_full(0, []),
+                        elem_id="party_scene_dynamic",
+                    )
+                party_scene_timer = gr.Timer(value=1.2)
+                party_scene_timer.tick(
+                    fn=_ui_render_party_dynamic,
+                    inputs=[],
+                    outputs=[party_scene_dynamic],
+                    show_progress="hidden",
+                )
 
                 with gr.Accordion("Start Internal Party", open=True):
                     with gr.Row():
@@ -479,34 +625,44 @@ def build_ui():
                         )
                     voice_choices_en = ["Default"] + get_available_voices("en")
                     voice_choices_it = ["Default"] + get_available_voices("it")
+                    # Default voices per agent
+                    DEFAULT_PARTY_VOICES = ["af_river", "bf_alice", "am_adam", "am_eric"]
+
+                    def _pick_voice(choices, preferred):
+                        return preferred if preferred in choices else "Default"
 
                     def _party_voice_choices(lang):
                         choices = voice_choices_it if lang and "Italian" in str(lang) else voice_choices_en
-                        upd = gr.update(choices=choices, value="Default")
-                        return upd, upd, upd, upd
+                        defaults = DEFAULT_PARTY_VOICES if "Italian" not in str(lang or "") else ["Default"] * 4
+                        return (
+                            gr.update(choices=choices, value=_pick_voice(choices, defaults[0])),
+                            gr.update(choices=choices, value=_pick_voice(choices, defaults[1])),
+                            gr.update(choices=choices, value=_pick_voice(choices, defaults[2])),
+                            gr.update(choices=choices, value=_pick_voice(choices, defaults[3])),
+                        )
 
                     with gr.Row():
                         party_voice_1 = gr.Dropdown(
                             choices=voice_choices_en,
-                            value="Default",
+                            value=_pick_voice(voice_choices_en, "af_river"),
                             label="Agent 1 voice",
                             allow_custom_value=False,
                         )
                         party_voice_2 = gr.Dropdown(
                             choices=voice_choices_en,
-                            value="Default",
+                            value=_pick_voice(voice_choices_en, "bf_alice"),
                             label="Agent 2 voice",
                             allow_custom_value=False,
                         )
                         party_voice_3 = gr.Dropdown(
                             choices=voice_choices_en,
-                            value="Default",
+                            value=_pick_voice(voice_choices_en, "am_adam"),
                             label="Agent 3 voice",
                             allow_custom_value=False,
                         )
                         party_voice_4 = gr.Dropdown(
                             choices=voice_choices_en,
-                            value="Default",
+                            value=_pick_voice(voice_choices_en, "am_eric"),
                             label="Agent 4 voice",
                             allow_custom_value=False,
                         )
@@ -520,7 +676,7 @@ def build_ui():
                         stop_party_btn = gr.Button("Stop Party", variant="stop")
                     party_status = gr.Textbox(label="Status", interactive=False, value="")
                     start_party_btn.click(
-                        fn=_ui_start_internal_party,
+                        fn=_ui_start_party_with_scene,
                         inputs=[
                             party_num_agents,
                             party_language,
@@ -530,9 +686,13 @@ def build_ui():
                             party_voice_3,
                             party_voice_4,
                         ],
-                        outputs=[party_status],
+                        outputs=[party_status, party_scene_static, party_scene_dynamic],
                     )
-                    stop_party_btn.click(fn=_ui_stop_internal_party, inputs=[], outputs=[party_status])
+                    stop_party_btn.click(
+                        fn=_ui_stop_party_with_scene,
+                        inputs=[],
+                        outputs=[party_status, party_scene_static, party_scene_dynamic],
+                    )
 
                 gr.Markdown("---")
                 gr.Markdown("### 📝 Party transcript")
@@ -585,42 +745,28 @@ if __name__ == "__main__":
     set_audio_devices(input_dev, output_dev)
 
     demo = build_ui()
+    port = getattr(args, "port", None) or 7860
+    user_set_port = getattr(args, "port", None) is not None
+
     try:
-        port = getattr(args, "port", None) or 7860
-        user_set_port = getattr(args, "port", None) is not None
-
-        def do_launch(p):
-            logger.info("Launching with Gradio UI (config + voice chat) on port %s...", p)
-            demo.launch(server_port=p)
-
-        # On port-in-use: try next ports when user didn't set --port. On ConnectError: retry once after 2s.
-        launch_err = None
-        for attempt in range(2):
-            try:
+        url = f"http://127.0.0.1:{port}"
+        print(f"\n  Running on local URL:  {url}\n")
+        logger.info("Launching with Gradio UI (config + voice chat) on port %s...", port)
+        demo.launch(server_name="0.0.0.0", server_port=port)
+    except OSError as e:
+        if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
+            for p in range(port + 1, 7871):
                 try:
-                    do_launch(port)
-                except OSError as e:
-                    if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
-                        for p in range(port + 1, 7871):
-                            try:
-                                do_launch(p)
-                            except OSError:
-                                continue
-                            break
-                        else:
-                            raise RuntimeError(
-                                f"No free port in {port}-7870. Use --port <number>."
-                            ) from e
-                    raise
-            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-                launch_err = e
-                if attempt == 0:
-                    logger.warning("Gradio startup check failed (%s), retrying in 2s...", e)
-                    time_module.sleep(2)
-                else:
-                    raise RuntimeError(
-                        "Gradio could not start (connection refused). "
-                        "Try: --port 7861, or close other apps using the port."
-                    ) from e
+                    url = f"http://127.0.0.1:{p}"
+                    print(f"\n  Running on local URL:  {url}\n")
+                    demo.launch(server_name="0.0.0.0", server_port=p)
+                except OSError:
+                    continue
+                break
+            else:
+                raise RuntimeError(
+                    f"No free port in {port}-7870. Use --port <number>."
+                ) from e
+        raise
     finally:
         audio_monitor_stop.set()

@@ -101,6 +101,7 @@ def _proactive_kick(agent: AgentRuntime, stop_event: threading.Event, speaker_lo
         logger.exception(f"[Agent{agent.agent_id}] Proactive kick failed: {e}")
     finally:
         agent.ai_is_speaking = False
+        agent.ai_is_thinking = False
         if speaker_lock:
             speaker_lock.release()
 
@@ -181,3 +182,26 @@ def get_party_transcript() -> str:
     for a in agents:
         parts.append(f"--- Agent {a.agent_id} ---\n{a.conversation.strip()}")
     return "\n\n".join(parts)
+
+
+# Character names for the party scene (cocktail party vibe)
+PARTY_CHARACTER_NAMES = ["Sage", "Maverick", "Luna", "Cosmo"]
+
+
+def get_agent_states() -> list[dict]:
+    """
+    Return agent states for the visual party UI.
+    Each dict: {agent_id, name, is_speaking, is_thinking}.
+    """
+    agents = _internal_party_agents
+    if not agents:
+        return []
+    return [
+        {
+            "agent_id": a.agent_id,
+            "name": PARTY_CHARACTER_NAMES[(a.agent_id - 1) % len(PARTY_CHARACTER_NAMES)],
+            "is_speaking": getattr(a, "ai_is_speaking", False),
+            "is_thinking": getattr(a, "ai_is_thinking", False),
+        }
+        for a in agents
+    ]
