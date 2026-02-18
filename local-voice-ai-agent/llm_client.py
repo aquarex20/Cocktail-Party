@@ -4,7 +4,11 @@ LLM Client Module
 Contains all payload definitions and functions for interacting with the local Ollama instance.
 """
 
+from typing import Union
+
 import requests
+
+from conversation_mode import ConversationMode
 import json
 from loguru import logger
 
@@ -127,8 +131,7 @@ def build_chat_payload(
 def stream_llm_response(
     transcript: str,
     system_prompt: str = COCKTAIL_PARTY_PROMPT,
-    alone: bool = False,
-    is_back_and_forth: bool = False,
+    mode: Union[ConversationMode, None] = None,
     language: str = "en",
 ):
     """
@@ -138,15 +141,19 @@ def stream_llm_response(
     Args:
         transcript: The conversation transcript to send to the LLM
         system_prompt: Optional custom system prompt (defaults to COCKTAIL_PARTY_PROMPT)
+        mode: ConversationMode to select prompt (ALONE, BACK_AND_FORTH, COCKTAIL_PARTY)
         language: 'en' or 'it' to use language-specific prompts (overrides default prompts when set)
     Yields:
         str: Text chunks as they arrive from the LLM
     """
+    if mode is None:
+        mode = ConversationMode.COCKTAIL_PARTY
     if language and language.lower() == "it":
         party_p, alone_p, forth_p, _ = get_prompts_for_language("it")
-        effective_prompt = alone_p if alone else (forth_p if is_back_and_forth else party_p)
+        _PROMPTS = {ConversationMode.ALONE: alone_p, ConversationMode.BACK_AND_FORTH: forth_p, ConversationMode.COCKTAIL_PARTY: party_p}
     else:
-        effective_prompt = ALONE_PROMPT if alone else (BACK_AND_FORTH_PROMPT if is_back_and_forth else system_prompt)
+        _PROMPTS = {ConversationMode.ALONE: ALONE_PROMPT, ConversationMode.BACK_AND_FORTH: BACK_AND_FORTH_PROMPT, ConversationMode.COCKTAIL_PARTY: system_prompt}
+    effective_prompt = _PROMPTS[mode]
     payload = build_chat_payload(transcript, system_prompt=effective_prompt)
 
     with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
