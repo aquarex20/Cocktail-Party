@@ -24,7 +24,7 @@ def get_device_lists():
 
 
 def set_audio_devices(input_device=None, output_device=None):
-    """Set sounddevice default device. Accepts name (str) or index (int). Only applies when both are set."""
+    """Set sounddevice default device. Accepts name (str) or index (int)."""
     if input_device is not None and output_device is not None:
         sd.default.device = (input_device, output_device)
         logger.info(f"Audio devices set: input={input_device!r}, output={output_device!r}")

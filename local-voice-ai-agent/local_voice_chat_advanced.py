@@ -8,8 +8,11 @@ import sys
 import threading
 import subprocess
 import time as time_module
+import queue
 
+import numpy as np
 import gradio as gr
+import httpx
 from fastrtc import ReplyOnPause, Stream, WebRTC
 from loguru import logger
 
@@ -25,7 +28,13 @@ from voice_config import (
     parse_device,
     run_testing_mode,
 )
-from voice_models import stream_tts_sync, stt_transcribe
+from voice_models import get_available_voices, stream_tts_sync, stt_transcribe
+
+# Two-agent mode: sample rate used by the input device monitor (must match InputStream)
+DEVICE_INPUT_SAMPLE_RATE = 16000
+# Silence duration (seconds) after voice before we send the buffer to STT
+DEVICE_INPUT_SILENCE_SEC = 1.5
+DEVICE_INPUT_VOLUME_THRESHOLD = 0.00001
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -34,6 +43,8 @@ logger.add(sys.stderr, level="DEBUG")
 # State
 # -----------------------------------------------------------------------------
 current_language = "en"
+# TTS voice ID for the agent (None = use language default). Only voices valid for current language should be used.
+current_tts_voice = None
 conversation = "\nTranscript:\n "
 someone_talking = False
 last_voice_detected = 0.0
@@ -45,6 +56,13 @@ _session_started = False
 audio_monitor_stop = threading.Event()
 _playback_lock = threading.Lock()
 _echo_lock = threading.Lock()
+
+# Two-agent mode: queue of (sample_rate, audio_array) from device input
+_device_input_queue = queue.Queue()
+_device_input_buffer = []
+_device_input_last_voice_time = 0.0
+_device_input_in_capture = False
+_device_input_lock = threading.Lock()
 
 
 # -----------------------------------------------------------------------------
@@ -79,7 +97,7 @@ def talk():
             if someone_talking:
                 break
             logger.debug(f"🗣️ TTS on chunk: {speak_part!r}")
-            for audio_chunk in stream_tts_sync(speak_part, current_language):
+            for audio_chunk in stream_tts_sync(speak_part, current_language, voice=current_tts_voice):
                 if someone_talking:
                     break
                 yield audio_chunk
@@ -90,7 +108,7 @@ def talk():
     if text_buffer:
         ai_reply += text_buffer
         logger.debug(f"🗣️ TTS on final chunk: {text_buffer!r}")
-        for audio_chunk in stream_tts_sync(text_buffer, current_language):
+        for audio_chunk in stream_tts_sync(text_buffer, current_language, voice=current_tts_voice):
             if someone_talking:
                 break
             yield audio_chunk
@@ -180,17 +198,63 @@ def proactive_speak():
         last_voice_detected = time_module.time()
 
 
-def start_audio_monitor():
+def audio_callback_two_agent(indata, frames, time, status):
+    """Accumulate input device audio when volume is high; on silence after voice, put (sr, array) in queue."""
+    global _device_input_buffer, _device_input_last_voice_time, _device_input_in_capture
+    if status:
+        logger.warning(f"Device input status: {status}")
+    audio_chunk = np.asarray(indata[:, 0].copy(), dtype=np.float32)
+    volume = (audio_chunk ** 2).mean() ** 0.5
+    now = time_module.time()
+    with _device_input_lock:
+        if volume >= DEVICE_INPUT_VOLUME_THRESHOLD:
+            _device_input_buffer.append(audio_chunk)
+            _device_input_last_voice_time = now
+            _device_input_in_capture = True
+        else:
+            if _device_input_in_capture and (now - _device_input_last_voice_time) >= DEVICE_INPUT_SILENCE_SEC:
+                if _device_input_buffer:
+                    audio_array = np.concatenate(_device_input_buffer)
+                    _device_input_queue.put((DEVICE_INPUT_SAMPLE_RATE, audio_array))
+                _device_input_buffer = []
+                _device_input_in_capture = False
+
+
+def _device_input_worker():
+    """Take (sample_rate, audio) from queue and run STT + talk + play (same as echo path)."""
+    while not audio_monitor_stop.is_set():
+        try:
+            audio = _device_input_queue.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        if audio is None:
+            break
+        sr, arr = audio
+        _echo_work((sr, arr))
+
+
+def start_audio_monitor(two_agent=False):
     def monitor_loop():
         import sounddevice as sd
-        with sd.InputStream(samplerate=16000, channels=1, callback=audio_callback):
-            logger.info("🎧 Audio monitor started...")
+        callback = audio_callback_two_agent if two_agent else audio_callback
+        with sd.InputStream(samplerate=16000, channels=1, callback=callback):
+            logger.info("🎧 Audio monitor started (two_agent=%s)...", two_agent)
             while not audio_monitor_stop.is_set():
                 sd.sleep(100)
             logger.info("🎧 Audio monitor stopped")
     thread = threading.Thread(target=monitor_loop, daemon=True)
     thread.start()
     return thread
+
+
+def start_two_agent_mode():
+    """Start monitor (device input -> queue) and worker (queue -> STT -> talk -> play). No proactive_speak."""
+    audio_monitor_stop.clear()
+    start_audio_monitor(two_agent=True)
+    worker = threading.Thread(target=_device_input_worker, daemon=True)
+    worker.start()
+    start_conversation_printer()
+    logger.info("Two-agent mode: listening on input device, responding to headphones + second output.")
 
 
 def start_conversation_printer():
@@ -258,9 +322,22 @@ def _ui_apply_language(lang_choice):
     global current_language
     if lang_choice and "Italian" in str(lang_choice):
         current_language = "it"
-        return "✅ Language set to **Italian**. AI, TTS and STT (Whisper) will use Italian."
-    current_language = "en"
-    return "✅ Language set to **English**. (Default setup.)"
+        status = "✅ Language set to **Italian**. AI, TTS and STT (Whisper) will use Italian."
+    else:
+        current_language = "en"
+        status = "✅ Language set to **English**. (Default setup.)"
+    voices = get_available_voices(current_language)
+    voice_choices = ["Default"] + (voices if isinstance(voices, (list, tuple)) else list(voices))
+    return status, gr.update(choices=voice_choices, value="Default")
+
+
+def _ui_apply_voice(voice_choice):
+    """Set the TTS voice for the agent. 'Default' or empty = use language default."""
+    global current_tts_voice
+    if not voice_choice or str(voice_choice).strip() == "Default":
+        current_tts_voice = None
+    else:
+        current_tts_voice = str(voice_choice).strip()
 
 
 def _ui_run_local_party():
@@ -292,7 +369,7 @@ def build_ui():
         gr.Markdown("Configure audio devices below, then start the session and use the voice chat.")
 
         with gr.Accordion("🔧 Audio configuration", open=True):
-            gr.Markdown("Choose where to capture audio (e.g. **BlackHole 2ch** for the party) and where to play it (e.g. your **headphones/speakers**). Leave as *System default* to use system defaults.")
+            gr.Markdown("Choose where to capture audio and where to play it.")
             with gr.Row():
                 input_dropdown = gr.Dropdown(choices=input_choices, value=SYSTEM_DEFAULT_LABEL, label="Input device", allow_custom_value=True)
                 output_dropdown = gr.Dropdown(choices=output_choices, value=SYSTEM_DEFAULT_LABEL, label="Output device", allow_custom_value=True)
@@ -301,14 +378,23 @@ def build_ui():
                 config_status = gr.Textbox(label="Status", interactive=False, value="")
             apply_btn.click(fn=_ui_apply_devices, inputs=[input_dropdown, output_dropdown], outputs=[config_status])
 
-        with gr.Accordion("🌐 Language", open=True):
+        with gr.Accordion("🌐 Language & TTS voice", open=True):
             gr.Markdown("Choose the language for the AI and TTS. Set this **before** starting the session.")
             with gr.Row():
                 language_dropdown = gr.Dropdown(choices=["English", "Italian"], value="Italian" if current_language == "it" else "English", label="Language")
                 apply_lang_btn = gr.Button("Apply language", variant="secondary")
                 language_status = gr.Markdown(value="")
-            apply_lang_btn.click(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status])
-            language_dropdown.change(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status])
+            voice_choices = ["Default"] + get_available_voices(current_language)
+            voice_dropdown = gr.Dropdown(
+                choices=voice_choices,
+                value="Default",
+                label="TTS voice (for current language)",
+                allow_custom_value=False,
+            )
+            apply_lang_btn.click(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
+            language_dropdown.change(fn=_ui_apply_language, inputs=[language_dropdown], outputs=[language_status, voice_dropdown])
+            voice_dropdown.change(fn=_ui_apply_voice, inputs=[voice_dropdown], outputs=[])
+            gr.Markdown("*Voice list is for the selected language. Change language to see voices for English or Italian. Default uses a built-in voice for that language.*")
             gr.Markdown("*For Italian: the AI and TTS use Italian. Transcription (STT) uses Whisper when you have installed: `pip install transformers torch`; otherwise the default STT is used and may be poor for Italian.*")
 
         with gr.Accordion("🧪 Testing mode", open=False):
@@ -355,7 +441,15 @@ if __name__ == "__main__":
         output_dev = parse_device(args.output_device)
     set_audio_devices(input_dev, output_dev)
 
-    if args.phone:
+    if getattr(args, "two_agent", False):
+        start_two_agent_mode()
+        try:
+            logger.info("Two-agent mode running. Press Ctrl+C to stop.")
+            while True:
+                time_module.sleep(1)
+        except KeyboardInterrupt:
+            audio_monitor_stop.set()
+    elif args.phone:
         monitor_thread = start_audio_monitor()
         printer_thread = start_conversation_printer()
         stream = create_stream()
@@ -367,7 +461,41 @@ if __name__ == "__main__":
     else:
         demo = build_ui()
         try:
-            logger.info("Launching with Gradio UI (config + voice chat)...")
-            demo.launch()
+            port = getattr(args, "port", None) or 7860
+            user_set_port = getattr(args, "port", None) is not None
+
+            def do_launch(p):
+                logger.info("Launching with Gradio UI (config + voice chat) on port %s...", p)
+                demo.launch(server_port=p)
+
+            # On port-in-use: try next ports when user didn't set --port. On ConnectError: retry once after 2s.
+            launch_err = None
+            for attempt in range(2):
+                try:
+                    try:
+                        do_launch(port)
+                    except OSError as e:
+                        if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
+                            for p in range(port + 1, 7871):
+                                try:
+                                    do_launch(p)
+                                except OSError:
+                                    continue
+                                break
+                            else:
+                                raise RuntimeError(
+                                    f"No free port in {port}-7870. Use --port <number>."
+                                ) from e
+                        raise
+                except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                    launch_err = e
+                    if attempt == 0:
+                        logger.warning("Gradio startup check failed (%s), retrying in 2s...", e)
+                        time_module.sleep(2)
+                    else:
+                        raise RuntimeError(
+                            "Gradio could not start (connection refused). "
+                            "Try: --port 7861, or close other apps using the port."
+                        ) from e
         finally:
             audio_monitor_stop.set()

@@ -87,6 +87,7 @@ Audio device configuration (optional):
     parser.add_argument("--phone", action="store_true", help="Launch with FastRTC phone interface (get a temp phone number)")
     parser.add_argument("--input-device", type=str, default=None, metavar="NAME_OR_INDEX", help="Audio input device (e.g. 'BlackHole 2ch' or index). Required for party setup.")
     parser.add_argument("--output-device", type=str, default=None, metavar="NAME_OR_INDEX", help="Audio output device (e.g. your headphones name or index). Same as Script Config output.")
+    parser.add_argument("--port", type=int, default=None, metavar="PORT", help="Gradio server port (default: auto when not set). Use e.g. --port 7860 for a fixed port.")
     parser.add_argument("--testing", action="store_true", help="Testing mode: show config explanation, list devices, optionally run local_party.py, then start session.")
     parser.add_argument("--language", type=str, choices=["en", "it"], default="en", help="Language: 'en' (English) or 'it' (Italian). Set before starting; Italian uses Italian prompts and TTS.")
     return parser

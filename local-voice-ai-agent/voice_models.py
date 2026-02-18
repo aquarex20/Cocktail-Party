@@ -38,8 +38,8 @@ def _find_kokoro_models():
     return None, None
 
 
-def _get_kokoro_italian():
-    """Lazy-load Kokoro for Italian TTS. Returns None if models not found."""
+def _get_kokoro():
+    """Lazy-load Kokoro for TTS (used for both English and Italian when voice selection or Italian is needed). Returns None if models not found."""
     global _kokoro_italian
     if _kokoro_italian is not None:
         return _kokoro_italian
@@ -51,32 +51,89 @@ def _get_kokoro_italian():
         _kokoro_italian = Kokoro(model_path, voices_path)
         return _kokoro_italian
     except Exception as e:
-        logger.warning(f"Could not load Kokoro for Italian TTS: {e}")
+        logger.warning(f"Could not load Kokoro for TTS: {e}")
         return None
 
 
-def stream_tts_sync(text, language):
-    """Yield (sample_rate, audio_array) chunks. English: default TTS; Italian: Kokoro if available."""
+# Default voice per language when none is selected (voices that work well for each lang)
+DEFAULT_VOICE_BY_LANG = {"en": "af_sarah", "it": "if_sara"}
+
+# Voice ID prefixes that are known to work per language (Kokoro: en-us vs it). If a voice matches none, it is shown for both.
+VOICE_PREFIX_BY_LANG = {
+    "en": ("af_", "am_", "bf_", "bm_"),   # American/British female/male
+    "it": ("if_", "im_"),                  # Italian female/male
+}
+
+
+def get_available_voices(language):
+    """
+    Return list of voice IDs available for the given language.
+    Filters to voices that match the language's known prefixes when possible;
+    otherwise returns all voices (same IDs used with different lang at synthesis time).
+    When Kokoro is not available (e.g. English-only fastrtc path), returns empty list (use default).
+    """
+    kokoro = _get_kokoro()
+    if kokoro is None:
+        return []
+    try:
+        raw = kokoro.get_voices()
+        voices = list(raw) if isinstance(raw, (list, tuple)) else list(raw) if raw else []
+        lang = (language or "en").lower()
+        prefixes = VOICE_PREFIX_BY_LANG.get(lang)
+        if not prefixes:
+            return voices
+        filtered = [v for v in voices if isinstance(v, str) and v.startswith(prefixes)]
+        return filtered if filtered else voices  # fallback to all if no prefix match
+    except Exception as e:
+        logger.warning(f"Could not get Kokoro voices: {e}")
+        return []
+
+
+def _stream_kokoro_sync(text, lang_code, voice):
+    """Helper: run Kokoro TTS with given lang and voice; yield (sample_rate, audio) chunks."""
+    kokoro = _get_kokoro()
+    if kokoro is None:
+        return
+    async def _collect():
+        chunks = []
+        stream = kokoro.create_stream(text.strip(), voice=voice, lang=lang_code)
+        async for samples, sample_rate in stream:
+            chunks.append((sample_rate, samples))
+        return chunks
+    try:
+        for sr, audio in asyncio.run(_collect()):
+            yield (sr, audio)
+    except Exception as e:
+        logger.error(f"Kokoro TTS failed ({lang_code}, {voice}): {e}")
+
+
+def stream_tts_sync(text, language, voice=None):
+    """
+    Yield (sample_rate, audio_array) chunks.
+    language: 'en' or 'it'.
+    voice: optional voice ID (e.g. 'af_sarah', 'if_sara'). If None, uses language default.
+    English: Kokoro when available (with voice), else fastrtc default. Italian: Kokoro only.
+    """
     if not text or not text.strip():
         return
-    if language and str(language).lower() == "it":
-        kokoro = _get_kokoro_italian()
+    lang = (language or "en").lower()
+    is_italian = lang == "it"
+
+    if is_italian:
+        kokoro = _get_kokoro()
         if kokoro is None:
             logger.error("Italian TTS requested but Kokoro not available; skipping audio.")
             return
-        async def _collect():
-            chunks = []
-            stream = kokoro.create_stream(text.strip(), voice="if_sara", lang="it")
-            async for samples, sample_rate in stream:
-                chunks.append((sample_rate, samples))
-            return chunks
-        try:
-            chunks = asyncio.run(_collect())
-        except Exception as e:
-            logger.error(f"Italian TTS failed: {e}")
-            return
-        for sr, audio in chunks:
-            yield (sr, audio)
+        effective_voice = voice or DEFAULT_VOICE_BY_LANG.get("it", "if_sara")
+        for chunk in _stream_kokoro_sync(text, "it", effective_voice):
+            yield chunk
+        return
+    # English: use Kokoro when available (so voice selection works), else fastrtc default
+    kokoro = _get_kokoro()
+    if kokoro is not None:
+        effective_voice = voice or DEFAULT_VOICE_BY_LANG.get("en", "af_sarah")
+        for chunk in _stream_kokoro_sync(text, "en-us", effective_voice):
+            yield chunk
     else:
         for chunk in tts_model.stream_tts_sync(text):
             yield chunk
