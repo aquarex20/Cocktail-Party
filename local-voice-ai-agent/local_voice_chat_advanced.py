@@ -206,35 +206,15 @@ def proactive_speak():
         last_voice_detected = time_module.time()
 
 
-def audio_callback_two_agent(indata, frames, time, status):
-    """Accumulate input device audio when volume is high; on silence after voice, put (sr, array) in queue."""
-    global _device_input_buffer, _device_input_last_voice_time, _device_input_in_capture
-    if status:
-        logger.warning(f"Device input status: {status}")
-    audio_chunk = np.asarray(indata[:, 0].copy(), dtype=np.float32)
-    volume = (audio_chunk ** 2).mean() ** 0.5
-    now = time_module.time()
-    with _device_input_lock:
-        if volume >= DEVICE_INPUT_VOLUME_THRESHOLD:
-            _device_input_buffer.append(audio_chunk)
-            _device_input_last_voice_time = now
-            _device_input_in_capture = True
-        else:
-            if _device_input_in_capture and (now - _device_input_last_voice_time) >= DEVICE_INPUT_SILENCE_SEC:
-                if _device_input_buffer:
-                    audio_array = np.concatenate(_device_input_buffer)
-                    _device_input_queue.put((DEVICE_INPUT_SAMPLE_RATE, audio_array))
-                _device_input_buffer = []
-                _device_input_in_capture = False
 
 
 
-def start_audio_monitor(two_agent=False):
+def start_audio_monitor():
     def monitor_loop():
         import sounddevice as sd
-        callback = audio_callback_two_agent if two_agent else audio_callback
+        callback = audio_callback   
         with sd.InputStream(samplerate=16000, channels=1, callback=callback):
-            logger.info("🎧 Audio monitor started (two_agent=%s)...", two_agent)
+            logger.info("🎧 Audio monitor started")
             while not audio_monitor_stop.is_set():
                 sd.sleep(100)
             logger.info("🎧 Audio monitor stopped")
