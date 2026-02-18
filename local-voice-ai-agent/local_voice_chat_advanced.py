@@ -13,7 +13,7 @@ import queue
 import numpy as np
 import gradio as gr
 import httpx
-from fastrtc import ReplyOnPause, Stream, WebRTC
+from fastrtc import ReplyOnPause, Stream
 from loguru import logger
 
 from audio_utils import get_device_lists, play_audio, set_audio_devices
@@ -29,6 +29,7 @@ from voice_config import (
     run_testing_mode,
 )
 from voice_models import get_available_voices, stream_tts_sync, stt_transcribe
+from webrtc_ui import add_voice_chat_block
 
 # Two-agent mode: sample rate used by the input device monitor (must match InputStream)
 DEVICE_INPUT_SAMPLE_RATE = 16000
@@ -264,7 +265,7 @@ def _ui_apply_devices(input_name, output_name):
     return "⚠️ Select both input and output (not System default) to apply, or leave as-is to use system default."
 
 
-def _ui_start_session():
+def _ui_start_session(selected_input_name=None):
     global _session_started, _audio_monitor_thread, _conversation_printer_thread
     if _session_started:
         return "✅ Session already running. Use the voice chat below."
@@ -381,12 +382,18 @@ def build_ui():
 
         gr.Markdown("---")
         gr.Markdown("### Start / Stop session")
-        gr.Markdown("Start the audio monitor (so the AI can react to room audio), then use the voice chat. Stop to change devices.")
+        gr.Markdown("Click **Start session** to start the audio monitor and voice chat. Voice chat uses the **Input device** above if not system default (browser may ask for mic permission).")
         with gr.Row():
             start_btn = gr.Button("Start session", variant="primary")
             stop_btn = gr.Button("Stop session", variant="stop")
             session_status = gr.Textbox(label="Session", interactive=False, value="")
-        start_btn.click(fn=_ui_start_session, inputs=[], outputs=[session_status])
+        add_voice_chat_block(
+            echo,
+            _ui_start_session,
+            start_btn,
+            input_dropdown,
+            session_status,
+        )
         stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
 
         gr.Markdown("---")
@@ -402,12 +409,6 @@ def build_ui():
         )
         transcript_timer = gr.Timer(value=1)
         transcript_timer.tick(fn=_ui_get_transcript, inputs=[], outputs=[transcript_box])
-
-        gr.Markdown("---")
-        gr.Markdown("### Voice chat (WebRTC)")
-        with gr.Column():
-            audio = WebRTC(mode="send-receive", modality="audio")
-            audio.stream(fn=ReplyOnPause(echo), inputs=[audio], outputs=[audio])
 
     return demo
 
@@ -430,43 +431,43 @@ if __name__ == "__main__":
         output_dev = parse_device(args.output_device)
     set_audio_devices(input_dev, output_dev)
 
-        demo = build_ui()
-        try:
-            port = getattr(args, "port", None) or 7860
-            user_set_port = getattr(args, "port", None) is not None
+    demo = build_ui()
+    try:
+        port = getattr(args, "port", None) or 7860
+        user_set_port = getattr(args, "port", None) is not None
 
-            def do_launch(p):
-                logger.info("Launching with Gradio UI (config + voice chat) on port %s...", p)
-                demo.launch(server_port=p)
+        def do_launch(p):
+            logger.info("Launching with Gradio UI (config + voice chat) on port %s...", p)
+            demo.launch(server_port=p)
 
-            # On port-in-use: try next ports when user didn't set --port. On ConnectError: retry once after 2s.
-            launch_err = None
-            for attempt in range(2):
+        # On port-in-use: try next ports when user didn't set --port. On ConnectError: retry once after 2s.
+        launch_err = None
+        for attempt in range(2):
+            try:
                 try:
-                    try:
-                        do_launch(port)
-                    except OSError as e:
-                        if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
-                            for p in range(port + 1, 7871):
-                                try:
-                                    do_launch(p)
-                                except OSError:
-                                    continue
-                                break
-                            else:
-                                raise RuntimeError(
-                                    f"No free port in {port}-7870. Use --port <number>."
-                                ) from e
-                        raise
-                except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-                    launch_err = e
-                    if attempt == 0:
-                        logger.warning("Gradio startup check failed (%s), retrying in 2s...", e)
-                        time_module.sleep(2)
-                    else:
-                        raise RuntimeError(
-                            "Gradio could not start (connection refused). "
-                            "Try: --port 7861, or close other apps using the port."
-                        ) from e
-        finally:
-            audio_monitor_stop.set()
+                    do_launch(port)
+                except OSError as e:
+                    if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
+                        for p in range(port + 1, 7871):
+                            try:
+                                do_launch(p)
+                            except OSError:
+                                continue
+                            break
+                        else:
+                            raise RuntimeError(
+                                f"No free port in {port}-7870. Use --port <number>."
+                            ) from e
+                    raise
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                launch_err = e
+                if attempt == 0:
+                    logger.warning("Gradio startup check failed (%s), retrying in 2s...", e)
+                    time_module.sleep(2)
+                else:
+                    raise RuntimeError(
+                        "Gradio could not start (connection refused). "
+                        "Try: --port 7861, or close other apps using the port."
+                    ) from e
+    finally:
+        audio_monitor_stop.set()
