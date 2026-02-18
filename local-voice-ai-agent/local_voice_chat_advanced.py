@@ -228,18 +228,6 @@ def audio_callback_two_agent(indata, frames, time, status):
                 _device_input_in_capture = False
 
 
-def _device_input_worker():
-    """Take (sample_rate, audio) from queue and run STT + talk + play (same as echo path)."""
-    while not audio_monitor_stop.is_set():
-        try:
-            audio = _device_input_queue.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if audio is None:
-            break
-        sr, arr = audio
-        _echo_work((sr, arr))
-
 
 def start_audio_monitor(two_agent=False):
     def monitor_loop():
