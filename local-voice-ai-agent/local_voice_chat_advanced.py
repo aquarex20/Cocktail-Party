@@ -5,6 +5,11 @@ Configuration, audio utils, and TTS/STT models are in separate modules.
 
 import os
 import sys
+
+# Disable SSL verification for self-signed cert (must run before httpx/gradio imports)
+if os.environ.get("USE_SSL", "").lower() in ("1", "true", "yes"):
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
 import threading
 import subprocess
 import time as time_module
@@ -37,6 +42,10 @@ from voice_config import (
 from utilities import extract_last_replies
 from voice_models import get_available_voices, stream_tts_sync, stt_transcribe
 from webrtc_ui import add_voice_chat_block
+
+# Placeholder labels when no audio devices (e.g. Docker)
+NO_INPUT_PLACEHOLDER = "(no input devices)"
+NO_OUTPUT_PLACEHOLDER = "(no output devices)"
 
 # Two-agent mode: sample rate used by the input device monitor (must match InputStream)
 DEVICE_INPUT_SAMPLE_RATE = 16000
@@ -262,6 +271,9 @@ def _ui_apply_devices(input_name, output_name):
         in_dev = parse_device(str(input_name).strip())
     if output_name and str(output_name).strip() and str(output_name).strip() != SYSTEM_DEFAULT_LABEL:
         out_dev = parse_device(str(output_name).strip())
+    # Reject placeholder labels (no real devices, e.g. in Docker)
+    if in_dev in (NO_INPUT_PLACEHOLDER, NO_OUTPUT_PLACEHOLDER) or out_dev in (NO_INPUT_PLACEHOLDER, NO_OUTPUT_PLACEHOLDER):
+        return "⚠️ No host audio devices available (normal in Docker). Use **System default** — voice chat uses your browser's mic and speakers."
     if in_dev is not None and out_dev is not None:
         set_audio_devices(in_dev, out_dev)
         if _session_started:
@@ -492,8 +504,9 @@ def build_ui():
     inputs_list, outputs_list = get_device_lists()
     input_names = [name for _, name in inputs_list]
     output_names = [name for _, name in outputs_list]
-    input_choices = [SYSTEM_DEFAULT_LABEL] + (input_names or ["(no input devices)"])
-    output_choices = [SYSTEM_DEFAULT_LABEL] + (output_names or ["(no output devices)"])
+    input_choices = [SYSTEM_DEFAULT_LABEL] + (input_names or [NO_INPUT_PLACEHOLDER])
+    output_choices = [SYSTEM_DEFAULT_LABEL] + (output_names or [NO_OUTPUT_PLACEHOLDER])
+    no_devices = not input_names and not output_names
 
     with gr.Blocks(
         title="Local Voice Chat Advanced",
@@ -504,6 +517,39 @@ def build_ui():
         #party_scene_wrapper > div { padding: 0 !important; overflow: hidden !important; }
         #party_scene_wrapper > div:first-child { height: 500px !important; overflow: hidden !important; }
         #party_scene_wrapper > div:last-child { position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; width: 100% !important; height: 500px !important; overflow: hidden !important; }
+        /*
+          WebRTC mic UI (fastrtc/gradio-webrtc) can render a full-screen overlay in some deployments
+          (often in Docker / different Gradio builds). That overlay blocks clicks on the rest of the app.
+
+          We still keep the component mounted so the Start session button can trigger mic permission
+          via JS, but we neutralize the overlay behavior and hide the wave UI.
+        */
+        [id^="webrtc_voice"] .audio-container.full-screen,
+        #webrtc_voice .audio-container.full-screen,
+        .audio-container.full-screen {
+            position: relative !important;
+            inset: auto !important;
+            width: 100% !important;
+            height: 1px !important;
+            max-height: 1px !important;
+            min-height: 0 !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            z-index: 0 !important;
+        }
+        /* Ensure it can never intercept clicks even if it grows. */
+        [id^="webrtc_voice"] .audio-container,
+        #webrtc_voice .audio-container {
+            pointer-events: none !important;
+        }
+        /* Hide the wave + buttons (we start/stop through the app buttons). */
+        [id^="webrtc_voice"] .gradio-webrtc-waveContainer,
+        [id^="webrtc_voice"] .wave-container,
+        [id^="webrtc_voice"] .wave-svg,
+        [id^="webrtc_voice"] .button-wrap {
+            display: none !important;
+        }
         """,
     ) as demo:
         gr.Markdown("# 🎤 Local Voice Chat Advanced")
@@ -519,6 +565,15 @@ def build_ui():
 
                 with gr.Accordion("🔧 Audio configuration", open=True):
                     gr.Markdown("Choose where to capture audio and where to play it.")
+                    if no_devices:
+                        gr.Markdown("""
+                        **No host audio devices detected** (normal in Docker). Leave as **System default** — the voice chat uses your **browser's microphone and speakers** via WebRTC.
+                        
+                        **If you see "Impossible d'accéder aux périphériques multimédias" / "Unable to access media devices":**
+                        - Use **https://localhost:7860** (Docker enables HTTPS by default)
+                        - Accept the browser's self-signed certificate warning
+                        - Grant microphone permission when the browser asks
+                        """)
                     with gr.Row():
                         input_dropdown = gr.Dropdown(choices=input_choices, value=SYSTEM_DEFAULT_LABEL, label="Input device", allow_custom_value=True)
                         output_dropdown = gr.Dropdown(choices=output_choices, value=SYSTEM_DEFAULT_LABEL, label="Output device", allow_custom_value=True)
@@ -748,18 +803,57 @@ if __name__ == "__main__":
     port = getattr(args, "port", None) or 7860
     user_set_port = getattr(args, "port", None) is not None
 
+    # HTTPS for browser mic access when not on localhost (e.g. Docker, remote access)
+    use_ssl = os.environ.get("USE_SSL", "").lower() in ("1", "true", "yes")
+    ssl_keyfile = ssl_certfile = None
+    if use_ssl:
+        import subprocess
+        import tempfile
+        cert_dir = tempfile.mkdtemp(prefix="gradio_ssl_")
+        ssl_keyfile = os.path.join(cert_dir, "key.pem")
+        ssl_certfile = os.path.join(cert_dir, "cert.pem")
+        try:
+            subprocess.run(
+                [
+                    "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                    "-keyout", ssl_keyfile, "-out", ssl_certfile,
+                    "-days", "365", "-nodes", "-subj", "/CN=localhost",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            logger.info("Generated self-signed SSL cert for HTTPS (browser mic access)")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.warning("SSL generation failed, falling back to HTTP: %s", e)
+            ssl_keyfile = ssl_certfile = None
+            use_ssl = False
+
     try:
-        url = f"http://127.0.0.1:{port}"
+        scheme = "https" if use_ssl else "http"
+        url = f"{scheme}://127.0.0.1:{port}"
         print(f"\n  Running on local URL:  {url}\n")
+        if use_ssl:
+            print("  Use HTTPS for browser microphone access (accept self-signed cert warning)\n")
         logger.info("Launching with Gradio UI (config + voice chat) on port %s...", port)
-        demo.launch(server_name="0.0.0.0", server_port=port)
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=port,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+        )
     except OSError as e:
         if ("port" in str(e).lower() or "address already in use" in str(e).lower()) and not user_set_port:
             for p in range(port + 1, 7871):
                 try:
-                    url = f"http://127.0.0.1:{p}"
+                    scheme = "https" if use_ssl else "http"
+                    url = f"{scheme}://127.0.0.1:{p}"
                     print(f"\n  Running on local URL:  {url}\n")
-                    demo.launch(server_name="0.0.0.0", server_port=p)
+                    demo.launch(
+                        server_name="0.0.0.0",
+                        server_port=p,
+                        ssl_keyfile=ssl_keyfile,
+                        ssl_certfile=ssl_certfile,
+                    )
                 except OSError:
                     continue
                 break

@@ -1,6 +1,9 @@
 # Docker Compose for Local Voice Chat Advanced + Party Manager
 # Includes Kokoro TTS voices. AI Party uses internal routing (no Blackhole).
 # Single Agent: WebRTC voice chat via browser. AI Party: agents talk in-process.
+#
+# IMPORTANT: The app needs ~4–6GB RAM for ML models. In Docker Desktop:
+# Settings → Resources → Memory → set to at least 6GB.
 
 services:
   voice-chat:
@@ -9,6 +12,14 @@ services:
       - "7860:7860"
     environment:
       - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal}
-    # Optional: mount Ollama if running locally
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_ANALYTICS_ENABLED=false
+      # Set USE_SSL=1 for HTTPS (needed if accessing via IP). Use 0 for HTTP on localhost.
+      - USE_SSL=${USE_SSL:-0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+    restart: on-failure

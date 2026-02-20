@@ -4,15 +4,18 @@ LLM Client Module
 Contains all payload definitions and functions for interacting with the local Ollama instance.
 """
 
+import json
+import os
 from typing import Union
 
 import requests
 
 from conversation_mode import ConversationMode
-import json
 from loguru import logger
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
+# Use OLLAMA_HOST for Docker (e.g. host.docker.internal); default 127.0.0.1 for local
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "127.0.0.1")
+OLLAMA_URL = f"http://{OLLAMA_HOST}:11434/api/chat"
 
 
 # ============================================================================

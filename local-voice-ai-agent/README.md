@@ -112,9 +112,24 @@ Use the **same output device** (your headphones/speakers) for both so you hear t
 
 ### Blackhole config for party
 
-Open **Audio MIDI Setup** on Mac (or equivalent multi-output device settings elsewhere). Create a new **Multi-Output Device**. In that device, select as outputs: **BlackHole 2ch** and your **headphones** (or desired output). Name it **Script Config** (or anything you like, and update `sd.default.device` in `local_party.py` to match). Set your Mac’s sound output to **Script Config**. You can comment out the `sd.default.device` lines in both files if you prefer to use system default for testing. 
+Open **Audio MIDI Setup** on Mac (or equivalent multi-output device settings elsewhere). Create a new **Multi-Output Device**. In that device, select as outputs: **BlackHole 2ch** and your **headphones** (or desired output). Name it **Script Config** (or anything you like, and update `sd.default.device` in `local_party.py` to match). Set your Mac’s sound output to **Script Config**. You can comment out the `sd.default.device` lines in both files if you prefer to use system default for testing.
 
-This will provide you with a temporary phone number that you can call to interact with the AI using your voice.
+### AI Party: multiple AIs talking to each other
+
+The app includes an **AI Party** tab that runs 2–4 AI agents conversing with each other via **internal audio routing** (no Blackhole or virtual devices):
+
+- Each agent: STT → LLM → TTS
+- Agent A's TTS output is fed directly to Agent B's "mic" (and vice versa) via an in-process `AudioBus`
+- Docker-friendly, works on any platform
+- Optional: monitor all agents to your headphones
+
+### Docker (optional)
+
+A `Dockerfile` and `docker-compose.yml` are provided for running the web UI in a container. Full audio personalization (Blackhole, voice chat) requires macOS; use the native app for AI Party.
+
+```bash
+docker compose up --build
+```
 
 ## How it works
 
