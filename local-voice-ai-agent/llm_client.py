@@ -6,13 +6,51 @@ Contains all payload definitions and functions for interacting with the local Ol
 
 from typing import Union
 
+import os
 import requests
 
 from conversation_mode import ConversationMode
 import json
 from loguru import logger
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
+def _is_running_in_docker() -> bool:
+    try:
+        if os.path.exists("/.dockerenv"):
+            return True
+    except Exception:
+        pass
+    try:
+        with open("/proc/1/cgroup", "rt", encoding="utf-8") as f:
+            s = f.read()
+        return ("docker" in s) or ("containerd" in s) or ("kubepods" in s)
+    except Exception:
+        return False
+
+
+def _get_ollama_url() -> str:
+    """
+    Resolve Ollama chat endpoint URL.
+
+    Precedence:
+    - OLLAMA_URL: full URL including /api/chat
+    - OLLAMA_HOST (+ optional OLLAMA_PORT): host/port, we append /api/chat
+    - default: http://127.0.0.1:11434/api/chat
+    """
+    direct = (os.getenv("OLLAMA_URL") or "").strip()
+    if direct:
+        return direct
+    host = (os.getenv("OLLAMA_HOST") or "").strip() or "127.0.0.1"
+    port = (os.getenv("OLLAMA_PORT") or "").strip() or "11434"
+    # Common footgun: inside Docker, localhost is the container, not the host.
+    # If we detect Docker and the host resolves to localhost, default to host.docker.internal.
+    if _is_running_in_docker() and host in {"127.0.0.1", "localhost"}:
+        host = (os.getenv("OLLAMA_DOCKER_HOST") or "").strip() or "host.docker.internal"
+    return f"http://{host}:{port}/api/chat"
+
+
+def _ollama_url_for_request() -> str:
+    # Resolve at request time so env overrides always apply.
+    return _get_ollama_url()
 
 
 # ============================================================================
@@ -156,20 +194,33 @@ def stream_llm_response(
     effective_prompt = _PROMPTS[mode]
     payload = build_chat_payload(transcript, system_prompt=effective_prompt)
 
-    with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line:
-                continue
-            data = json.loads(line.decode("utf-8"))
-            chunk = ""
-            if "message" in data and "content" in data["message"]:
-                chunk = data["message"]["content"].replace("*", "")
-            elif "delta" in data:
-                chunk = data["delta"].replace("*", "")
+    try:
+        url = _ollama_url_for_request()
+        with requests.post(url, json=payload, stream=True) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line.decode("utf-8"))
+                chunk = ""
+                if "message" in data and "content" in data["message"]:
+                    chunk = data["message"]["content"].replace("*", "")
+                elif "delta" in data:
+                    chunk = data["delta"].replace("*", "")
 
-            if chunk:
-                yield chunk
+                if chunk:
+                    yield chunk
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            "LLM request failed. OLLAMA_URL=%r (env: OLLAMA_URL=%r OLLAMA_HOST=%r OLLAMA_PORT=%r). "
+            "If running in Docker, use host.docker.internal (or set OLLAMA_DOCKER_HOST). Error: %s",
+            url,
+            os.getenv("OLLAMA_URL"),
+            os.getenv("OLLAMA_HOST"),
+            os.getenv("OLLAMA_PORT"),
+            e,
+        )
+        raise
 
 
 def get_llm_response(
@@ -193,7 +244,20 @@ def get_llm_response(
         system_prompt = summary_p
     payload = build_chat_payload(transcript, system_prompt=system_prompt, stream=False)
     print("payload is "+str(payload))
-    response = requests.post(OLLAMA_URL, json=payload)
+    try:
+        url = _ollama_url_for_request()
+        response = requests.post(url, json=payload)
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            "LLM request failed. OLLAMA_URL=%r (env: OLLAMA_URL=%r OLLAMA_HOST=%r OLLAMA_PORT=%r). "
+            "If running in Docker, use host.docker.internal (or set OLLAMA_DOCKER_HOST). Error: %s",
+            url,
+            os.getenv("OLLAMA_URL"),
+            os.getenv("OLLAMA_HOST"),
+            os.getenv("OLLAMA_PORT"),
+            e,
+        )
+        raise
     response.raise_for_status()
     data = response.json()
     
@@ -228,18 +292,43 @@ def stream_custom_chat(
         stream=True,
     )
 
-    with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line:
-                continue
-            data = json.loads(line.decode("utf-8"))
-            chunk = ""
-            if "message" in data and "content" in data["message"]:
-                chunk = data["message"]["content"].replace("*", "")
-            elif "delta" in data:
-                chunk = data["delta"].replace("*", "")
+    try:
+        url = _ollama_url_for_request()
+        with requests.post(url, json=payload, stream=True) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line.decode("utf-8"))
+                chunk = ""
+                if "message" in data and "content" in data["message"]:
+                    chunk = data["message"]["content"].replace("*", "")
+                elif "delta" in data:
+                    chunk = data["delta"].replace("*", "")
 
-            if chunk:
-                yield chunk
+                if chunk:
+                    yield chunk
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            "LLM request failed. OLLAMA_URL=%r (env: OLLAMA_URL=%r OLLAMA_HOST=%r OLLAMA_PORT=%r). "
+            "If running in Docker, use host.docker.internal (or set OLLAMA_DOCKER_HOST). Error: %s",
+            url,
+            os.getenv("OLLAMA_URL"),
+            os.getenv("OLLAMA_HOST"),
+            os.getenv("OLLAMA_PORT"),
+            e,
+        )
+        raise
+
+
+logger.info(
+    "Ollama endpoint resolved to {url!r} (docker={docker}, env: "
+    "OLLAMA_URL={OLLAMA_URL!r} OLLAMA_HOST={OLLAMA_HOST!r} OLLAMA_PORT={OLLAMA_PORT!r} OLLAMA_DOCKER_HOST={OLLAMA_DOCKER_HOST!r})",
+    url=_get_ollama_url(),
+    docker=_is_running_in_docker(),
+    OLLAMA_URL=os.getenv("OLLAMA_URL"),
+    OLLAMA_HOST=os.getenv("OLLAMA_HOST"),
+    OLLAMA_PORT=os.getenv("OLLAMA_PORT"),
+    OLLAMA_DOCKER_HOST=os.getenv("OLLAMA_DOCKER_HOST"),
+)
 

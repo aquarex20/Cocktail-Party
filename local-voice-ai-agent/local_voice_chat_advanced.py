@@ -60,6 +60,7 @@ last_summary_time = 0
 summary = "\nSummary:\n"
 ai_is_speaking = False
 _session_started = False
+_use_browser_audio = False
 
 audio_monitor_stop = threading.Event()
 _audio_monitor_thread = None
@@ -125,7 +126,15 @@ def talk():
     conversation += "\n" + ai_reply
 
 
-def _echo_work(audio):
+def echo(audio):
+    """
+    WebRTC callback: takes a mic recording, transcribes, then streams back TTS audio.
+
+    - In Docker (or when "browser audio" mode is enabled), this is the primary I/O path:
+      mic input comes from the browser and TTS audio is returned to the browser.
+    - In local device mode, we can still play audio via sounddevice (server-side) and
+      optionally return nothing to the browser.
+    """
     global conversation, ai_is_speaking
     if audio_monitor_stop.is_set() or not _session_started:
         return
@@ -140,24 +149,26 @@ def _echo_work(audio):
             return
         logger.debug(f"🎤 Transcript: {transcript}")
         conversation += "\nUser:" + transcript
+
         ai_is_speaking = True
         try:
-            for audio_chunk in talk():
-                if someone_talking or audio_monitor_stop.is_set() or not _session_started:
+            for sample_rate, audio_data in talk():
+                if audio_monitor_stop.is_set() or not _session_started:
                     break
-                sample_rate, audio_data = audio_chunk
-                play_audio(audio_data, sample_rate)
-                if someone_talking or audio_monitor_stop.is_set() or not _session_started:
+                # If using browser audio, stream TTS back to the WebRTC component.
+                if _use_browser_audio:
+                    yield (sample_rate, audio_data)
+                    continue
+                # Otherwise, do local playback via sounddevice.
+                try:
+                    play_audio(audio_data, sample_rate)
+                except Exception as e:
+                    logger.exception(f"Local playback failed (sounddevice): {e}")
                     break
         except Exception as e:
-            logger.exception(f"Talk/play failed: {e}")
+            logger.exception(f"Talk failed: {e}")
         finally:
             ai_is_speaking = False
-
-
-def echo(audio):
-    threading.Thread(target=_echo_work, args=(audio,), daemon=True).start()
-    yield
 
 
 def create_stream():
@@ -201,6 +212,12 @@ def proactive_speak():
     global ai_is_speaking, last_voice_detected
     if audio_monitor_stop.is_set() or not _session_started:
         return
+    if _use_browser_audio:
+        # Proactive TTS is tied to server-side audio monitoring and playback.
+        # In browser-audio mode (Docker-friendly), we only respond when the user speaks.
+        ai_is_speaking = False
+        last_voice_detected = time_module.time()
+        return
     try:
         logger.debug("🎙️ AI proactively speaking...")
         for audio_chunk in talk():
@@ -219,13 +236,20 @@ def proactive_speak():
 
 def start_audio_monitor():
     def monitor_loop():
-        import sounddevice as sd
-        callback = audio_callback   
-        with sd.InputStream(samplerate=16000, channels=1, callback=callback):
-            logger.info("🎧 Audio monitor started")
-            while not audio_monitor_stop.is_set():
-                sd.sleep(100)
-            logger.info("🎧 Audio monitor stopped")
+        try:
+            import sounddevice as sd
+        except Exception as e:
+            logger.exception(f"sounddevice unavailable; audio monitor disabled: {e}")
+            return
+        callback = audio_callback
+        try:
+            with sd.InputStream(samplerate=16000, channels=1, callback=callback):
+                logger.info("🎧 Audio monitor started")
+                while not audio_monitor_stop.is_set():
+                    sd.sleep(100)
+                logger.info("🎧 Audio monitor stopped")
+        except Exception as e:
+            logger.exception(f"Failed to start audio monitor (sounddevice): {e}")
     thread = threading.Thread(target=monitor_loop, daemon=True)
     thread.start()
     return thread
@@ -254,8 +278,50 @@ def _restart_audio_monitor():
 # -----------------------------------------------------------------------------
 # UI
 # -----------------------------------------------------------------------------
+def _is_running_in_docker() -> bool:
+    # Best-effort detection; safe on macOS/Windows hosts too.
+    try:
+        if os.path.exists("/.dockerenv"):
+            return True
+    except Exception:
+        pass
+    try:
+        with open("/proc/1/cgroup", "rt", encoding="utf-8") as f:
+            s = f.read()
+        return ("docker" in s) or ("containerd" in s) or ("kubepods" in s)
+    except Exception:
+        return False
+
+
+def _ui_set_browser_audio(enabled: bool):
+    global _use_browser_audio
+    _use_browser_audio = bool(enabled)
+    if _use_browser_audio:
+        return "✅ Browser audio mode enabled. Mic + speaker run in the browser (Docker-friendly). Device dropdowns are ignored."
+    return "✅ Browser audio mode disabled. App will use `sounddevice` for output (and audio monitor if session is started)."
+
+
+def _ui_docker_help():
+    return (
+        "If `sounddevice`/PortAudio can’t see your host audio from Docker, that’s expected.\n\n"
+        "**Recommended (works on macOS/Windows/Linux):** enable **Browser audio mode** above. "
+        "The browser will ask for microphone permission, and the AI audio will play in the browser.\n\n"
+        "**Linux-only host device passthrough (advanced):** you can expose ALSA devices to the container (speaker+mic) by mapping `/dev/snd` "
+        "and granting the container access to the `audio` group. Example (rough):\n\n"
+        "```bash\n"
+        "docker run --rm -it \\\n"
+        "  --device /dev/snd \\\n"
+        "  --group-add audio \\\n"
+        "  -p 7860:7860 <image>\n"
+        "```\n\n"
+        "If you’re on Docker Desktop (macOS/Windows), `/dev/snd` passthrough doesn’t provide host audio the same way—use Browser audio mode."
+    )
+
+
 def _ui_apply_devices(input_name, output_name):
     global _session_started
+    if _use_browser_audio:
+        return "ℹ️ Browser audio mode is enabled. Input/output devices are selected in your browser, not via `sounddevice`."
     in_dev = None
     out_dev = None
     if input_name and str(input_name).strip() and str(input_name).strip() != SYSTEM_DEFAULT_LABEL:
@@ -278,8 +344,14 @@ def _ui_start_session(selected_input_name=None):
         return "✅ Session already running. Use the voice chat below."
     _session_started = True
     audio_monitor_stop.clear()
-    _audio_monitor_thread = start_audio_monitor()
+    # In browser-audio mode we don't start server-side monitoring (sounddevice).
+    if not _use_browser_audio:
+        _audio_monitor_thread = start_audio_monitor()
+    else:
+        _audio_monitor_thread = None
     _conversation_printer_thread = start_conversation_printer()
+    if _use_browser_audio:
+        return "✅ Session started (browser audio). Use the voice chat below; your browser will handle mic permission and audio output."
     return "✅ Session started. You can use the voice chat below and hear the AI on your configured output."
 
 
@@ -489,7 +561,17 @@ def _ui_render_party_dynamic():
 
 
 def build_ui():
-    inputs_list, outputs_list = get_device_lists()
+    docker_detected = _is_running_in_docker()
+    # Default to browser audio when running in Docker.
+    global _use_browser_audio
+    if docker_detected:
+        _use_browser_audio = True
+
+    try:
+        inputs_list, outputs_list = get_device_lists()
+    except Exception as e:
+        logger.exception(f"Failed to list audio devices (sounddevice). Falling back to empty device lists: {e}")
+        inputs_list, outputs_list = [], []
     input_names = [name for _, name in inputs_list]
     output_names = [name for _, name in outputs_list]
     input_choices = [SYSTEM_DEFAULT_LABEL] + (input_names or ["(no input devices)"])
@@ -508,6 +590,101 @@ def build_ui():
     ) as demo:
         gr.Markdown("# 🎤 Local Voice Chat Advanced")
         gr.Markdown("Choose a tab: **Single Agent** for one-on-one chat, **AI Party** to run multiple AIs talking to each other, or **Testing** for local_party.")
+
+        with gr.Accordion("🐳 Docker / Browser permissions (use if Docker)", open=docker_detected):
+            gr.Markdown(
+                f"**Docker detected:** `{docker_detected}`\n\n"
+                "This app can run in two modes:\n\n"
+                "- **Browser audio mode (recommended in Docker):** mic + speaker in your browser via WebRTC.\n"
+                "- **Device mode:** uses `sounddevice` inside the Python process (often fails in containers without extra setup).\n"
+            )
+            browser_audio_toggle = gr.Checkbox(value=_use_browser_audio, label="Enable Browser audio mode (Docker-friendly)")
+            browser_audio_status = gr.Markdown(value=_ui_set_browser_audio(_use_browser_audio))
+            browser_audio_toggle.change(fn=_ui_set_browser_audio, inputs=[browser_audio_toggle], outputs=[browser_audio_status])
+
+            # Gradio's `js=` callback is used to *produce input values* for the Python fn.
+            # To update outputs from JS (without raising "Parameter `0` ..." errors), we pass the JS result
+            # via a hidden input and use an identity Python fn.
+            js_message_in = gr.Textbox(visible=False, value="")
+
+            permission_status = gr.Markdown(value="")
+            request_mic_btn = gr.Button("Request microphone permission", variant="primary")
+            # Trigger browser getUserMedia prompt without starting a session.
+            request_mic_btn.click(
+                fn=lambda msg: msg,
+                inputs=[js_message_in],
+                outputs=[permission_status],
+                js="""
+                async () => {
+                  try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(t => t.stop());
+                    return ["✅ Microphone permission granted (or already granted)."];
+                  } catch (e) {
+                    return ["❌ Microphone permission denied or blocked. Check browser site permissions."];
+                  }
+                }
+                """,
+            )
+
+            unlock_audio_btn = gr.Button("Unlock audio playback (autoplay)", variant="secondary")
+            unlock_audio_btn.click(
+                fn=lambda msg: msg,
+                inputs=[js_message_in],
+                outputs=[permission_status],
+                js="""
+                async () => {
+                  try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const o = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    g.gain.value = 0.0001;
+                    o.connect(g); g.connect(ctx.destination);
+                    o.frequency.value = 440;
+                    o.start();
+                    o.stop(ctx.currentTime + 0.05);
+                    await ctx.resume();
+                    return ["✅ Audio playback unlocked (short silent beep)."];
+                  } catch (e) {
+                    return ["⚠️ Could not unlock audio playback in this browser."];
+                  }
+                }
+                """,
+            )
+
+            devices_status = gr.Markdown(value="")
+            refresh_devices_btn = gr.Button("Refresh browser device list", variant="secondary")
+            refresh_devices_btn.click(
+                fn=lambda msg: msg,
+                inputs=[js_message_in],
+                outputs=[devices_status],
+                js="""
+                async () => {
+                  try {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                      return ["❌ enumerateDevices() not available in this browser context."];
+                    }
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const ins = devices.filter(d => d.kind === "audioinput");
+                    const outs = devices.filter(d => d.kind === "audiooutput");
+                    const fmt = (arr) => arr.length
+                      ? arr.map((d, i) => `- ${i+1}. ${d.label || "(label hidden — grant mic permission first)"}${d.deviceId ? "" : ""}`).join("\\n")
+                      : "- (none)";
+                    const md =
+                      `### Browser devices\\n\\n` +
+                      `**Audio inputs (mics)**\\n${fmt(ins)}\\n\\n` +
+                      `**Audio outputs (speakers)**\\n${fmt(outs)}\\n\\n` +
+                      `Note: browsers usually only reveal device labels **after** mic permission is granted.\\n` +
+                      `Also, selecting a specific output device requires browser support for setSinkId; WebRTC output typically uses your default system output.`;
+                    return [md];
+                  } catch (e) {
+                    return ["❌ Failed to enumerate devices. Try granting mic permission first, then refresh."];
+                  }
+                }
+                """,
+            )
+
+            docker_help = gr.Markdown(value=_ui_docker_help())
 
         with gr.Tabs():
             # -----------------------------------------------------------------
