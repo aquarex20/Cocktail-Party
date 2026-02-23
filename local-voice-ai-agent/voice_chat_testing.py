@@ -77,7 +77,21 @@ with gr.Blocks() as demo:
                 mode="send-receive",
                 modality="audio",
             )
-        audio.stream(fn=ReplyOnPause(response),
-                    inputs=[audio], outputs=[audio],
-                    time_limit=60)
-demo.launch()
+        audio.stream(fn=ReplyOnPause(
+        response,
+        algo_options=AlgoOptions(
+            audio_chunk_duration=0.6,
+            started_talking_threshold=0.2,
+            speech_threshold=0.1
+        ),
+        model_options=SileroVadOptions(
+            threshold=0.5,
+            min_speech_duration_ms=250,
+            min_silence_duration_ms=100
+        )
+    ),
+    inputs=[audio], outputs=[audio],
+    )
+    
+    demo.launch()
+
