@@ -42,26 +42,6 @@ def response(audio: tuple[int, np.ndarray]): #
     for audio_chunk in tts_model.stream_tts_sync(response_text):
         yield audio_chunk
 
-stream = Stream(
-    handler=ReplyOnPause(
-        response,
-        algo_options=AlgoOptions(
-            audio_chunk_duration=0.6,
-            started_talking_threshold=0.2,
-            speech_threshold=0.1
-        ),
-        model_options=SileroVadOptions(
-            threshold=0.5,
-            min_speech_duration_ms=250,
-            min_silence_duration_ms=100
-        )
-    ),
-    modality="audio",
-    mode="send-receive",
-)
-
-#stream.ui.launch()
-
 
 with gr.Blocks() as demo:
     gr.HTML(
@@ -92,6 +72,6 @@ with gr.Blocks() as demo:
     ),
     inputs=[audio], outputs=[audio],
     )
-    
+
     demo.launch()
 
