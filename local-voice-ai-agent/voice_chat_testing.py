@@ -60,4 +60,24 @@ stream = Stream(
     mode="send-receive",
 )
 
-stream.ui.launch()
+#stream.ui.launch()
+
+
+with gr.Blocks() as demo:
+    gr.HTML(
+    """
+    <h1 style='text-align: center'>
+    Chat (Powered by WebRTC ⚡️)
+    </h1>
+    """
+    )
+    with gr.Column():
+        with gr.Group():
+            audio = WebRTC(
+                mode="send-receive",
+                modality="audio",
+            )
+        audio.stream(fn=ReplyOnPause(response),
+                    inputs=[audio], outputs=[audio],
+                    time_limit=60)
+demo.launch()
