@@ -19,7 +19,13 @@ tts_model = get_tts_model()  # kokoro
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
+import gradio as gr
 
+app_state = {"language": "English"}
+
+def update_language(lang):
+    app_state["language"] = lang
+    print("Language updated to:", lang)
 
 def response(audio: tuple[int, np.ndarray]): # 
     sample_rate, audio_array = audio
@@ -51,6 +57,20 @@ with gr.Blocks() as demo:
     </h1>
     """
     )
+    gr.Markdown("## Language Selector")
+
+    language_selector = gr.Dropdown(
+        choices=["English", "Italian"],
+        value="Italian",
+        label="Choose Language"
+    )
+    # 🔹 This updates immediately when changed
+    language_selector.change(
+        fn=update_language,
+        inputs=language_selector,
+        outputs=None
+    )
+
     with gr.Column():
         with gr.Group():
             audio = WebRTC(
@@ -72,6 +92,9 @@ with gr.Blocks() as demo:
     ),
     inputs=[audio], outputs=[audio],
     )
+    with gr.Row():
+        with gr.Column():
+            gr.Textbox(label="Conversation", interactive=False, lines=10)
 
     demo.launch()
 
