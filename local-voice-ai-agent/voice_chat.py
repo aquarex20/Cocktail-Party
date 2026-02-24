@@ -40,15 +40,6 @@ def update_language(lang):
 def update_voice(voice):
     return gr.update(value=voice), voice
 
-async def warmup_kokoro(kokoro):
-    async for _samples, _sr in kokoro.create_stream(
-        "hi", voice=voice_value, speed=1.0, lang="en-us"
-    ):
-        break  # just force first chunk 
-    logger.debug("Kokoro warmed up")
-
-warmup_kokoro(kokoro)
-
             
 async def stream_tts(text, voice_value: str, language_value: str):
     async for samples, sr in kokoro.create_stream(
@@ -75,7 +66,7 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     if transcript is None:
         print("No transcript")
         return
-    transformers_convo.append({"role": "user", "content": transcript})
+    new_convo=transformers_convo+[{"role": "user", "content": transcript}]
     conversation_value += "User: " + transcript + "\n"
     logger.debug(f"🎤 Transcript: {transcript}")
     response = chat(
@@ -91,13 +82,13 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     )
     response_text = clean_text_for_tts(response["message"]["content"])
     logger.debug(f"🤖 Response: {response_text}")
-    transformers_convo.append({"role": "assistant", "content": response_text})
+    new_convo= new_convo +[{"role": "assistant", "content": response_text}]
     conversation_value += "AI (you are talking to the user): " + response_text + "\n"
     
     chunks = split_for_tts(response_text)
     print("done")
     for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
-        yield audio_chunk, AdditionalOutputs(transformers_convo, conversation_value)
+        yield audio_chunk, AdditionalOutputs(new_convo, conversation_value)
 
 with gr.Blocks(css="""
 .audio-container {
@@ -159,7 +150,7 @@ with gr.Blocks(css="""
         audio.stream(fn=ReplyOnPause(
         response    ),
         inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
-        outputs=[audio, conversation_state],
+        outputs=[audio],
         )
         audio.on_additional_outputs(
             lambda s, a: (s,a),
