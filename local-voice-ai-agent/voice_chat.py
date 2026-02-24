@@ -17,6 +17,8 @@ import numpy as np
 import onnxruntime as ort
 from utilities import clean_text_for_tts, preprocess_audio, split_for_tts
 from fastrtc import get_tts_model, KokoroTTSOptions
+import html
+import time
 load_dotenv()
 
 OLLAMA_MODEL = "gemma3:4b"
@@ -27,8 +29,41 @@ kokoro=Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-
 voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
+def sanitize_messages(msgs):
+    safe = []
+    for m in msgs or []:
+        role = m.get("role", "assistant")
+        content = m.get("content", "")
+        if content is None:
+            content = ""
+        # force string
+        content = str(content)
+        safe.append({"role": role, "content": content})
+    return safe
+def render_chat(msgs):
+    print(f"Rendering chat: {msgs}")
+    out = ["<div style='display:flex;flex-direction:column;gap:8px;'>"]
+    for m in msgs:
+        role = m["role"]
+        txt = html.escape(m["content"])
+        if role == "user":
+            out.append(
+                "<div style='align-self:flex-end;max-width:75%;"
+                "background:#2b2b2b;color:#fff;padding:10px 12px;"
+                "border-radius:16px 16px 4px 16px;'>"
+                f"{txt}</div>"
+            )
+        else:
+            out.append(
+                "<div style='align-self:flex-start;max-width:75%;"
+                "background:#f2f2f2;color:#111;padding:10px 12px;"
+                "border-radius:16px 16px 16px 4px;'>"
+                f"{txt}</div>"
+            )
+    out.append("</div>")
+    return "\n".join(out)
+
 
 def update_language(lang):
     voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
@@ -58,7 +93,26 @@ async def stream_tts(text, voice_value: str, language_value: str):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
- 
+def sanitize_messages(msgs):
+    safe = []
+    for m in msgs or []:
+        role = m.get("role", "assistant")
+        content = m.get("content", "")
+        if content is None:
+            content = ""
+        # force string
+        content = str(content)
+        safe.append({"role": role, "content": content})
+    return safe
+
+def _validate_chatbot_messages(msgs):
+    if not isinstance(msgs, list):
+        raise TypeError(f"chatbot payload must be list, got {type(msgs)}")
+    for m in msgs[-5:]:
+        if not isinstance(m, dict) or "role" not in m or "content" not in m:
+            raise TypeError(f"bad message: {m!r}")
+
+
 def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
     sample_rate, audio_array = preprocess_audio(*audio)
 
@@ -66,8 +120,13 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     if transcript is None:
         print("No transcript")
         return
-    new_convo=transformers_convo+[{"role": "user", "content": transcript}]
+    new_convo=sanitize_messages(transformers_convo)+[{"role": "user", "content": transcript}]
     conversation_value += "User: " + transcript + "\n"
+
+    # before yielding
+
+    #yield AdditionalOutputs(("user", transcript))
+
     logger.debug(f"🎤 Transcript: {transcript}")
     response = chat(
         model="gemma3:4b",
@@ -84,8 +143,61 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     logger.debug(f"🤖 Response: {response_text}")
     new_convo= new_convo +[{"role": "assistant", "content": response_text}]
     conversation_value += "AI (you are talking to the user): " + response_text + "\n"
+    #yield AdditionalOutputs(("assistant", response_text))
+
     for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
-        yield audio_chunk, AdditionalOutputs(new_convo, conversation_value)
+        yield audio_chunk, AdditionalOutputs(conversation_value, new_convo)
+def render_bubbles(messages):
+    """
+    messages: list of dicts like {"role": "user"|"assistant", "content": "..."}
+    returns: HTML string to put inside gr.Markdown
+    """
+    out = ["""
+    <div style="
+      height:420px;
+      overflow-y:auto;
+      overflow-x:hidden;
+      border:1px solid #3333;
+      border-radius:12px;
+      padding:12px;
+    ">
+    <div style="display:flex;flex-direction:column;gap:10px;">
+    """]
+
+    for m in messages:
+        role = m.get("role", "assistant")
+        text = html.escape(str(m.get("content", "") or ""))
+
+        if role == "user":
+            out.append(
+                "<div style='display:flex;justify-content:flex-end;'>"
+                "<div style='max-width:75%;background:#2b2b2b;color:#fff;"
+                "padding:10px 12px;border-radius:16px 16px 4px 16px;"
+                "white-space:pre-wrap;word-wrap:break-word;'>"
+                f"{text}</div></div>"
+            )
+        else:
+            out.append(
+                "<div style='display:flex;justify-content:flex-start;'>"
+                "<div style='max-width:75%;background:#f2f2f2;color:#111;"
+                "padding:10px 12px;border-radius:16px 16px 16px 4px;"
+                "white-space:pre-wrap;word-wrap:break-word;'>"
+                f"{text}</div></div>"
+            )
+
+    out.append("</div>")
+    return "\n".join(out)
+
+def ao_handler(*args):
+    # Most common: args[0] is the payload you yielded in AdditionalOutputs(...)
+    payload = args[0]
+
+    # If you yielded AdditionalOutputs(x, y), payload is usually (x, y)
+    if isinstance(payload, (list, tuple)) and len(payload) == 2:
+        return payload[0], payload[1]
+
+    # Fallback: don't break UI
+    return gr.update(), gr.update()
 
 with gr.Blocks(css="""
 .audio-container {
@@ -98,8 +210,8 @@ with gr.Blocks(css="""
 """) as demo:
     language_state = gr.State("English")
     voice_state = gr.State("af_heart")
-    conversation_state = gr.State("")
     transformers_convo = gr.State(value=[])
+    conversation_state = gr.State("")
 
     gr.HTML(
     """
@@ -142,19 +254,23 @@ with gr.Blocks(css="""
             )
 
         with gr.Column():
-            transcript = gr.Chatbot(label="transcript", type="messages")
+            gr.Markdown("<div style='text-align:center'><h2>Chat History</h2></div>")
 
+            chat_md = gr.HTML()
+            chat_state = gr.State([])
+
+            timer=gr.Timer(2.0)
+            def update_html(transformers_convo):
+                return render_bubbles(transformers_convo)
+            timer.tick(update_html, inputs=[transformers_convo], outputs=[chat_md])
         audio.stream(fn=ReplyOnPause(
         response    ),
         inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
         outputs=[audio],
         )
-        audio.on_additional_outputs(
-            lambda s, a: (s,a),
-            outputs=[transcript, conversation_state],
-            queue=False,
-            show_progress="hidden",
+        audio.on_additional_outputs( lambda s,r: (s,r),
+            outputs=[conversation_state, transformers_convo],
+            queue=False
         )  
-    
-    demo.launch(inbrowser=True)   
+demo.launch(inbrowser=True, debug=True)   
 
