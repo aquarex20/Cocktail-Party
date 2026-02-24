@@ -9,6 +9,8 @@ import numpy as np
 import asyncio
 import json
 import httpx
+import threading
+import base64
 from kokoro_onnx import Kokoro
 import os
 from dotenv import load_dotenv
@@ -19,6 +21,8 @@ from utilities import clean_text_for_tts, preprocess_audio, split_for_tts
 from fastrtc import get_tts_model, KokoroTTSOptions
 import html
 import time
+import secrets
+
 load_dotenv()
 
 OLLAMA_MODEL = "gemma3:4b"
@@ -30,17 +34,34 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
-def sanitize_messages(msgs):
-    safe = []
-    for m in msgs or []:
-        role = m.get("role", "assistant")
-        content = m.get("content", "")
-        if content is None:
-            content = ""
-        # force string
-        content = str(content)
-        safe.append({"role": role, "content": content})
-    return safe
+
+DIARIZATION_SERVER_URL = os.getenv("DIARIZATION_SERVER_URL", "http://127.0.0.1:8001")
+
+
+def enqueue_diarization(session_id: str, audio_array: np.ndarray, sample_rate: int) -> None:
+    """
+    Fire-and-forget diarization: send audio to the FastAPI server without blocking UI/audio.
+    """
+    try:
+        payload_b64 = base64.b64encode(audio_array.astype(np.float32, copy=False).tobytes()).decode("ascii")
+    except Exception:
+        return
+
+    def _post():
+        try:
+            httpx.post(
+                f"{DIARIZATION_SERVER_URL}/diarize/ingest",
+                json={
+                    "name": session_id or "default",
+                    "sample_rate": int(sample_rate),
+                    "audio_f32_b64": payload_b64,
+                },
+                timeout=0.2,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_post, daemon=True).start()
 def render_chat(msgs):
     print(f"Rendering chat: {msgs}")
     out = ["<div style='display:flex;flex-direction:column;gap:8px;'>"]
@@ -93,18 +114,6 @@ async def stream_tts(text, voice_value: str, language_value: str):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
-def sanitize_messages(msgs):
-    safe = []
-    for m in msgs or []:
-        role = m.get("role", "assistant")
-        content = m.get("content", "")
-        if content is None:
-            content = ""
-        # force string
-        content = str(content)
-        safe.append({"role": role, "content": content})
-    return safe
-
 def _validate_chatbot_messages(msgs):
     if not isinstance(msgs, list):
         raise TypeError(f"chatbot payload must be list, got {type(msgs)}")
@@ -115,12 +124,15 @@ def _validate_chatbot_messages(msgs):
 
 def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
     sample_rate, audio_array = preprocess_audio(*audio)
+    reply_id = secrets.token_urlsafe(12)  # e.g. "Y2v8oH8p0oH7Jx4k"
+    # Non-blocking diarization (server-side).
+    enqueue_diarization(reply_id, audio_array, sample_rate)
 
     transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
     if transcript is None:
         print("No transcript")
         return
-    new_convo=sanitize_messages(transformers_convo)+[{"role": "user", "content": transcript}]
+    new_convo=transformers_convo+[{"role": "user", "content": transcript}]
     conversation_value += "User: " + transcript + "\n"
 
     # before yielding
@@ -263,6 +275,12 @@ with gr.Blocks(css="""
             def update_html(transformers_convo):
                 return render_bubbles(transformers_convo)
             timer.tick(update_html, inputs=[transformers_convo], outputs=[chat_md])
+
+            timer_diarization=gr.Timer(2.0)
+            def update_diarization(transformers_convo):
+                diarization_segments = get_diarization_segments(transformers_convo)
+                return render_diarization(transformers_convo)
+            timer_diarization.tick(update_diarization, inputs=[transformers_convo], outputs=[diarization_md])
         audio.stream(fn=ReplyOnPause(
         response    ),
         inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
