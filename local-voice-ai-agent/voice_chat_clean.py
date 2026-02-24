@@ -1,12 +1,13 @@
 import sys
 import argparse
-
-from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model
+import gradio as gr
+from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model, WebRTC
 from loguru import logger
 from ollama import chat
-
+from kokoro_onnx import Kokoro
 stt_model = get_stt_model()  # moonshine/base
 tts_model = get_tts_model()  # kokoro
+kokoro_model=Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")

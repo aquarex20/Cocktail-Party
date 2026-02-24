@@ -1,14 +1,18 @@
 import whisperx
 import gc
 from whisperx.diarize import DiarizationPipeline
+import os
+from dotenv import load_dotenv
 
-device = "cuda"
-audio_file = "audio.mp3"
+load_dotenv()
+
+device = "cpu"
+audio_file = "audio3.wav"
 batch_size = 16 # reduce if low on GPU mem
-compute_type = "float16" # change to "int8" if low on GPU mem (may reduce accuracy)
+compute_type = "int8" # change to "int8" if low on GPU mem (may reduce accuracy)
 
 # 1. Transcribe with original whisper (batched)
-model = whisperx.load_model("large-v2", device, compute_type=compute_type)
+model = whisperx.load_model("large-v3", device, compute_type=compute_type)
 
 # save model to local path (optional)
 # model_dir = "/path/"
@@ -31,7 +35,7 @@ print(result["segments"]) # after alignment
 # import gc; import torch; gc.collect(); torch.cuda.empty_cache(); del model_a
 
 # 3. Assign speaker labels
-diarize_model = DiarizationPipeline(token=YOUR_HF_TOKEN, device=device)
+diarize_model = DiarizationPipeline(token=os.environ.get("HUGGING_FACE_TOKEN"), device=device)
 
 # add min/max number of speakers if known
 diarize_segments = diarize_model(audio)
