@@ -232,6 +232,7 @@ def _refine_loop():
             pass
 
         time.sleep(max(1, int(REFINE_INTERVAL_S)))
+        print("Refining loop")
 
 
 def _get_hf_token() -> str | None:
@@ -509,4 +510,4 @@ if app is not None:
         if _refine_thread_started:
             return
         _refine_thread_started = True
-        #threading.Thread(target=_refine_loop, daemon=True).start()
+        threading.Thread(target=_refine_loop, daemon=True).start()

@@ -194,14 +194,33 @@ async def stream_tts(text, voice_value: str, language_value: str):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
-def _validate_chatbot_messages(msgs):
-    if not isinstance(msgs, list):
-        raise TypeError(f"chatbot payload must be list, got {type(msgs)}")
-    for m in msgs[-5:]:
-        if not isinstance(m, dict) or "role" not in m or "content" not in m:
-            raise TypeError(f"bad message: {m!r}")
 
+def convo_to_transcript(transformers_convo: list[dict]) -> str:
+    lines = []
+    for m in transformers_convo or []:
+        role = m.get("role", "assistant")
 
+        if role == "assistant":
+            lines.append(f"AI: {m.get('content','')}")
+            continue
+
+        if role == "user":
+            runs = m.get("speaker_runs") or []
+            if isinstance(runs, list) and runs:
+                for r in runs:
+                    spk = r.get("speaker") or "unassigned"
+                    txt = r.get("text") or ""
+                    if txt.strip():
+                        lines.append(f"{spk}: {txt}")
+            else:
+                spk = m.get("speaker_label") or "unassigned"
+                lines.append(f"{spk}: {m.get('content','')}")
+            continue
+
+        # fallback for any other roles
+        lines.append(f"{role.upper()}: {m.get('content','')}")
+
+    return "\n".join(lines).strip()
 def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
     sample_rate, audio_array = preprocess_audio(*audio)
     reply_id = secrets.token_urlsafe(12)
@@ -231,16 +250,24 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_value+".",
+                "content": (
+                    "You are a helpful assistant at a cocktail party.\n"
+                    "The conversation transcript you receive may contain speaker labels like SPK_00, SPK_01, etc., and AI.\n"
+                    "Those labels are ONLY for context.\n"
+                    "Respond naturally to the conversation in "
+                    + language_value +
+                    ".\n"
+                    "IMPORTANT: Output ONLY the response text. Do NOT include any speaker labels or prefixes (no 'AI:', no 'User:', no 'SPK_00:')."
+                ),
             },
-            {"role": "user", "content": conversation_value},
+            {"role": "user", "content": convo_to_transcript(new_convo) or "User: " + transcript + "\n"},
         ],
-        options={"num_predict": 100},
+        options={"num_predict": 200},
     )
     response_text = clean_text_for_tts(response["message"]["content"])
     logger.debug(f"🤖 Response: {response_text}")
     new_convo= new_convo +[{"role": "assistant", "content": response_text}]
-    conversation_value += "AI (you are talking to the user): " + response_text + "\n"
+    conversation_value += "AI: " + response_text + "\n"
     #yield AdditionalOutputs(("assistant", response_text))
 
     for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
