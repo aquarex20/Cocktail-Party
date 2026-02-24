@@ -84,9 +84,6 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     logger.debug(f"🤖 Response: {response_text}")
     new_convo= new_convo +[{"role": "assistant", "content": response_text}]
     conversation_value += "AI (you are talking to the user): " + response_text + "\n"
-    
-    chunks = split_for_tts(response_text)
-    print("done")
     for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
         yield audio_chunk, AdditionalOutputs(new_convo, conversation_value)
 
