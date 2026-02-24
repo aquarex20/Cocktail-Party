@@ -120,7 +120,7 @@ def response2(audio: tuple[int, np.ndarray], string_identifier: str, transformer
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_state.value+".",
+                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_value+".",
             },
             {"role": "user", "content": conversation_value},
         ],
