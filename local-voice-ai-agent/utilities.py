@@ -4,9 +4,8 @@ import librosa
 import onnxruntime as ort
 
 def clean_text_for_tts(text: str) -> str:
-    # keep letters, numbers, spaces, and . , ; ! ?
-    return re.sub(r'[^A-Za-z0-9 .,;!?]', '', text)
-
+    # keep letters, numbers, spaces, and . , ; ! ?'
+    return re.sub(r"[^A-Za-z0-9 .,;!?'\u2019]", '', text)
 
 def preprocess_audio(sr, x):
     # (1, N) → (N,)
