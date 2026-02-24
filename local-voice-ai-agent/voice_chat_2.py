@@ -132,7 +132,7 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     if transcript is None:
         print("No transcript")
         return
-    new_convo=transformers_convo+[{"role": "user", "content": transcript}]
+    new_convo=transformers_convo+[{"role": "user", "content": transcript, "reply_id": reply_id}]
     conversation_value += "User: " + transcript + "\n"
 
     # before yielding
