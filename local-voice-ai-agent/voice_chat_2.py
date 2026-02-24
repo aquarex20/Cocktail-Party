@@ -76,9 +76,14 @@ def _speaker_runs_from_assigned(assigned: dict | None):
     return runs
 
 
-def explode_user_message_by_speaker_runs(transformers_convo: list[dict], utterances: dict) -> list[dict]:
+def annotate_user_messages_with_speaker_runs(transformers_convo: list[dict], utterances: dict) -> list[dict]:
+    """
+    "Monolith" approach:
+    - Keep ONE user message per reply_id
+    - Attach `speaker_runs=[{speaker,text},...]` when available
+    - Never expands the list length (so timer ticks stay idempotent)
+    """
     out = []
-    print(f"Exploding user message by speaker runs: {utterances}")
     for m in transformers_convo or []:
         if m.get("role") != "user":
             out.append(m)
@@ -87,23 +92,19 @@ def explode_user_message_by_speaker_runs(transformers_convo: list[dict], utteran
         rid = m.get("reply_id")
         u = (utterances or {}).get(rid) or {}
         assigned = u.get("assigned_refined") or u.get("assigned")
+        runs = _speaker_runs_from_assigned(assigned)
 
-        runs = _speaker_runs_from_assigned(assigned)  # from earlier snippet
-
-        if not runs:
-            out.append({**m, "speaker_label": "unassigned"})
-            continue
-
-        # Replace the single message with multiple messages at same position
-        for r in runs:
-            out.append(
-                {
-                    **m,
-                    "speaker_label": r["speaker"],
-                    "content": r["text"],
-                    "reply_id": rid,
-                }
-            )
+        mm = dict(m)
+        if runs:
+            mm["speaker_runs"] = runs
+            if len(runs) == 1:
+                mm["speaker_label"] = runs[0].get("speaker") or "unassigned"
+            else:
+                mm["speaker_label"] = "mixed"
+        else:
+            mm["speaker_runs"] = []
+            mm["speaker_label"] = "unassigned"
+        out.append(mm)
 
     return out
 
@@ -250,22 +251,26 @@ def render_bubbles(messages):
     returns: HTML string to put inside gr.Markdown
     """
     def _user_bg_for_label(label: str | None) -> str:
-        import hashlib
+        """
+        Deterministic, high-separation colors for speaker labels.
+        - SPK_00, SPK_01, ... map to distinct hues (no palette collisions)
+        - unassigned -> neutral gray
+        """
+        import re
 
         if not label or label == "unassigned":
             return "#555555"
 
-        palette = [
-            "#2b2b2b",  # charcoal
-            "#1f4d7a",  # deep blue
-            "#1f6b5a",  # teal
-            "#5a2a6b",  # purple
-            "#6b2a2a",  # maroon
-            "#4a5d23",  # olive
-            "#2a5a6b",  # blue-teal
-        ]
-        h = hashlib.md5(label.encode("utf-8")).hexdigest()
-        return palette[int(h[:8], 16) % len(palette)]
+        m = re.match(r"^SPK_(\d+)$", str(label))
+        if m:
+            i = int(m.group(1))
+            # golden angle for evenly spaced hues
+            hue = (i * 137.508) % 360.0
+            return f"hsl({hue:.1f}, 55%, 33%)"
+
+        # fallback for any other label
+        hue = (sum(ord(c) for c in str(label)) * 13) % 360
+        return f"hsl({hue}, 50%, 34%)"
 
     out = ["""
     <div style="
@@ -287,17 +292,39 @@ def render_bubbles(messages):
         header_label = html.escape(str(header_label))
 
         if role == "user":
-            bg = _user_bg_for_label(str(speaker_label) if speaker_label is not None else None)
-            out.append(
-                "<div style='display:flex;justify-content:flex-end;'>"
-                "<div style='max-width:75%;background:"
-                f"{bg}"
-                ";color:#fff;"
-                "padding:10px 12px;border-radius:16px 16px 4px 16px;"
-                "white-space:pre-wrap;word-wrap:break-word;'>"
-                f"<div style='font-size:11px;opacity:0.9;margin-bottom:6px;font-weight:600;'>{header_label}</div>"
-                f"{text}</div></div>"
-            )
+            runs = m.get("speaker_runs") or []
+            if isinstance(runs, list) and len(runs) > 0:
+                out.append(
+                    "<div style='display:flex;justify-content:flex-end;'>"
+                    "<div style='display:flex;flex-direction:column;gap:6px;max-width:75%;align-items:flex-end;'>"
+                )
+                for r in runs:
+                    spk = str(r.get("speaker") or "unassigned")
+                    run_text = html.escape(str(r.get("text") or ""))
+                    bg = _user_bg_for_label(spk)
+                    spk_h = html.escape(spk)
+                    out.append(
+                        "<div style='width:100%;background:"
+                        f"{bg}"
+                        ";color:#fff;"
+                        "padding:10px 12px;border-radius:16px 16px 4px 16px;"
+                        "white-space:pre-wrap;word-wrap:break-word;'>"
+                        f"<div style='font-size:11px;opacity:0.9;margin-bottom:6px;font-weight:600;'>{spk_h}</div>"
+                        f"{run_text}</div>"
+                    )
+                out.append("</div></div>")
+            else:
+                bg = _user_bg_for_label(str(speaker_label) if speaker_label is not None else None)
+                out.append(
+                    "<div style='display:flex;justify-content:flex-end;'>"
+                    "<div style='max-width:75%;background:"
+                    f"{bg}"
+                    ";color:#fff;"
+                    "padding:10px 12px;border-radius:16px 16px 4px 16px;"
+                    "white-space:pre-wrap;word-wrap:break-word;'>"
+                    f"<div style='font-size:11px;opacity:0.9;margin-bottom:6px;font-weight:600;'>{header_label}</div>"
+                    f"{text}</div></div>"
+                )
         else:
             out.append(
                 "<div style='display:flex;justify-content:flex-start;'>"
@@ -390,7 +417,7 @@ with gr.Blocks(css="""
             timer_diarization=gr.Timer(2.0)
             def update_convo_with_diarization(transformers_convo):
                 diarization_utterances = get_diarization_utterances(SESSION_ID)
-                new_convo = explode_user_message_by_speaker_runs(transformers_convo, diarization_utterances)
+                new_convo = annotate_user_messages_with_speaker_runs(transformers_convo, diarization_utterances)
                 return new_convo
             timer_diarization.tick(update_convo_with_diarization, inputs=[transformers_convo], outputs=[transformers_convo])
         audio.stream(fn=ReplyOnPause(
