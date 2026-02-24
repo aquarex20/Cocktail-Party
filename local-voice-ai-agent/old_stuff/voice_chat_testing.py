@@ -17,6 +17,10 @@ from kokoro_onnx import Kokoro
 import os
 from dotenv import load_dotenv
 from whisper_stt import WhisperSTT
+import asyncio
+from whisper_stt import transcribe_on_pause
+
+
 load_dotenv()
 
 OLLAMA_MODEL = "gemma3:4b"
@@ -72,7 +76,7 @@ async def response(audio: tuple[int, np.ndarray], string_identifier: str, transf
     global CONVERSATION_STATE, LANGUAGE_STATE, VOICE_STATE
     sample_rate, audio_array = audio
 
-    transcript = stt_models[LANGUAGE_STATE].stt(audio)
+    transcript = "test"##await asyncio.to_thread(stt_models[LANGUAGE_STATE].stt, audio)
     transformers_convo.append({"role": "user", "content": transcript})
     logger.debug(f"🎤 Transcript: {transcript}")
     response = chat(

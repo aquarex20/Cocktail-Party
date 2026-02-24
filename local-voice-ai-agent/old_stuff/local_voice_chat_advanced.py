@@ -14,6 +14,8 @@ import threading
 import subprocess
 import time as time_module
 import queue
+import math
+from collections import deque
 
 import numpy as np
 import gradio as gr
@@ -82,6 +84,204 @@ _device_input_buffer = []
 _device_input_last_voice_time = 0.0
 _device_input_in_capture = False
 _device_input_lock = threading.Lock()
+
+# -----------------------------------------------------------------------------
+# Live input meter (waveform + dBFS)
+# -----------------------------------------------------------------------------
+_meter_lock = threading.Lock()
+_meter_waveform_seconds = 1.2
+_meter_waveform = np.zeros(int(DEVICE_INPUT_SAMPLE_RATE * _meter_waveform_seconds), dtype=np.float32)
+_meter_widx = 0
+_meter_last_dbfs = -120.0
+_meter_dbfs_history = deque(maxlen=150)  # (t, dbfs)
+_meter_has_data = False
+
+_voice_cfg_lock = threading.Lock()
+_voice_baseline_dbfs = None
+_voice_margin_db = 10.0
+_voice_dbfs_threshold = -55.0
+
+
+def _get_voice_cfg():
+    with _voice_cfg_lock:
+        return (
+            None if _voice_baseline_dbfs is None else float(_voice_baseline_dbfs),
+            float(_voice_margin_db),
+            float(_voice_dbfs_threshold),
+        )
+
+
+def _set_voice_cfg(*, baseline_dbfs=None, margin_db=None, threshold_dbfs=None):
+    global _voice_baseline_dbfs, _voice_margin_db, _voice_dbfs_threshold
+    with _voice_cfg_lock:
+        if baseline_dbfs is not None:
+            _voice_baseline_dbfs = float(baseline_dbfs)
+        if margin_db is not None:
+            _voice_margin_db = float(margin_db)
+        if threshold_dbfs is not None:
+            _voice_dbfs_threshold = float(threshold_dbfs)
+
+
+def _ui_set_baseline(margin_db: float):
+    snap, _hist = _meter_snapshot()
+    if snap is None:
+        return "⚠️ No audio yet. Start the session and speak (or make noise), then click **Set baseline**."
+    _waveform, current_dbfs = snap
+    try:
+        margin = float(margin_db)
+    except Exception:
+        margin = 10.0
+    threshold = float(current_dbfs) + margin
+    _set_voice_cfg(baseline_dbfs=current_dbfs, margin_db=margin, threshold_dbfs=threshold)
+    return f"✅ Baseline set to **{current_dbfs:.1f} dBFS** → talking threshold = **{threshold:.1f} dBFS** (baseline + {margin:.1f} dB)."
+
+
+def _ui_set_margin(margin_db: float):
+    baseline, _old_margin, threshold = _get_voice_cfg()
+    try:
+        margin = float(margin_db)
+    except Exception:
+        margin = 10.0
+    if baseline is None:
+        _set_voice_cfg(margin_db=margin)
+        return f"✅ Margin set to {margin:.1f} dB. (Set baseline to auto-compute a threshold.)"
+    new_threshold = float(baseline) + margin
+    _set_voice_cfg(margin_db=margin, threshold_dbfs=new_threshold)
+    return f"✅ Margin set to {margin:.1f} dB → talking threshold = {new_threshold:.1f} dBFS."
+
+
+def _dbfs_from_audio(x: np.ndarray) -> float:
+    # dBFS where 0 dBFS ~= full-scale (|x|=1). Mic input is typically far below that.
+    rms = float(np.sqrt(np.mean(np.square(x), dtype=np.float64)))
+    rms = max(rms, 1e-12)
+    return 20.0 * math.log10(rms)
+
+
+def _meter_push(audio_chunk: np.ndarray):
+    global _meter_widx, _meter_last_dbfs, _meter_has_data
+    if audio_chunk is None:
+        return
+    x = np.asarray(audio_chunk, dtype=np.float32).reshape(-1)
+    if x.size == 0:
+        return
+    dbfs = _dbfs_from_audio(x)
+    now = time_module.time()
+    with _meter_lock:
+        n = x.size
+        buf = _meter_waveform
+        if n >= buf.size:
+            buf[:] = x[-buf.size :]
+            _meter_widx = 0
+        else:
+            end = _meter_widx + n
+            if end <= buf.size:
+                buf[_meter_widx:end] = x
+            else:
+                split = buf.size - _meter_widx
+                buf[_meter_widx:] = x[:split]
+                buf[: end - buf.size] = x[split:]
+            _meter_widx = end % buf.size
+        _meter_last_dbfs = dbfs
+        _meter_dbfs_history.append((now, dbfs))
+        _meter_has_data = True
+
+
+def _meter_snapshot():
+    with _meter_lock:
+        if not _meter_has_data:
+            return None, None
+        buf = _meter_waveform.copy()
+        widx = int(_meter_widx)
+        dbfs = float(_meter_last_dbfs)
+        hist = list(_meter_dbfs_history)
+    if widx:
+        buf = np.concatenate([buf[widx:], buf[:widx]])
+    return (buf, dbfs), hist
+
+
+def _ui_render_input_meter():
+    snap, hist = _meter_snapshot()
+    if snap is None:
+        return """
+        <div style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px;">
+          <div style="font-family: ui-sans-serif, system-ui; color:#334155;">
+            Start the session to see the live mic waveform + dB meter.
+          </div>
+        </div>
+        """
+    waveform, dbfs = snap
+    baseline, margin, threshold = _get_voice_cfg()
+    baseline_txt = "—" if baseline is None else f"{baseline:.1f} dBFS"
+
+    # Downsample waveform for rendering.
+    points = 600
+    if waveform.size > points:
+        idx = np.linspace(0, waveform.size - 1, points).astype(np.int32)
+        y = waveform[idx]
+    else:
+        y = waveform
+        points = y.size
+
+    # SVG waveform polyline
+    W, H = 800, 160
+    mid = H / 2
+    scale = (H * 0.44)
+    xs = np.linspace(0, W, points)
+    ys = mid - np.clip(y, -1.0, 1.0) * scale
+    poly = " ".join(f"{xs[i]:.1f},{ys[i]:.1f}" for i in range(points))
+
+    # dBFS meter and history polyline
+    dbfs_clamped = float(np.clip(dbfs, -80.0, 0.0))
+    meter_pct = int(round((dbfs_clamped + 80.0) / 80.0 * 100.0))
+
+    # History: last 15s
+    now = time_module.time()
+    hist_recent = [(t, v) for (t, v) in (hist or []) if now - t <= 15.0]
+    if len(hist_recent) >= 2:
+        hw, hh = 800, 70
+        t0 = hist_recent[0][0]
+        t1 = hist_recent[-1][0]
+        dt = max(t1 - t0, 1e-6)
+        hx = [(t - t0) / dt * hw for (t, _) in hist_recent]
+        hv = [float(np.clip(v, -80.0, 0.0)) for (_, v) in hist_recent]
+        hy = [hh - ((v + 80.0) / 80.0 * hh) for v in hv]
+        hpoly = " ".join(f"{hx[i]:.1f},{hy[i]:.1f}" for i in range(len(hx)))
+    else:
+        hpoly = ""
+
+    return f"""
+    <div style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap: 12px; margin-bottom: 8px;">
+        <div style="font-family: ui-sans-serif, system-ui; color:#0f172a; font-weight: 650;">
+          Input monitor
+        </div>
+        <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color:#0f172a;">
+          {dbfs:.1f} dBFS
+        </div>
+      </div>
+
+      <div style="display:flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; font-family: ui-sans-serif, system-ui; font-size: 12px; color: #334155;">
+        <div><span style="color:#64748b;">Threshold:</span> <b style="color:#0f172a;">{threshold:.1f} dBFS</b></div>
+        <div><span style="color:#64748b;">Baseline:</span> <b style="color:#0f172a;">{baseline_txt}</b> <span style="color:#64748b;">(+{margin:.1f} dB)</span></div>
+      </div>
+
+      <div style="height: 10px; background: #e2e8f0; border-radius: 999px; overflow:hidden; margin-bottom: 10px;">
+        <div style="height: 10px; width: {meter_pct}%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);"></div>
+      </div>
+
+      <svg viewBox="0 0 {W} {H}" width="100%" height="{H}" style="display:block; background:#0b1220; border-radius: 10px;">
+        <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{poly}" />
+        <line x1="0" y1="{mid}" x2="{W}" y2="{mid}" stroke="rgba(148,163,184,0.3)" stroke-width="1"/>
+      </svg>
+
+      <div style="margin-top: 10px; font-family: ui-sans-serif, system-ui; color:#334155; font-size: 12px;">
+        dBFS history (last ~15s)
+      </div>
+      <svg viewBox="0 0 800 70" width="100%" height="70" style="display:block; background:#0b1220; border-radius: 10px; margin-top: 6px;">
+        <polyline fill="none" stroke="#34d399" stroke-width="2" points="{hpoly}" />
+      </svg>
+    </div>
+    """
 
 
 # -----------------------------------------------------------------------------
@@ -190,8 +390,11 @@ def audio_callback(indata, frames, time, status):
     if status:
         print(f"Status: {status}")
     audio_chunk = indata[:, 0]
-    volume = (audio_chunk ** 2).mean() ** 0.5
-    if volume >= 0.00001:
+    _meter_push(audio_chunk)
+    dbfs = _dbfs_from_audio(audio_chunk)
+    _baseline, _margin, threshold = _get_voice_cfg()
+    if dbfs >= threshold:
+        print("Someone is talking")
         someone_talking = True
         last_voice_detected = time_module.time()
         if last_summary_time == 0:
@@ -333,6 +536,50 @@ def _ui_apply_voice(voice_choice):
 def _ui_get_transcript():
     """Return current conversation for the dashboard transcript UI."""
     return conversation.strip() or "Transcript will appear here as you speak and the AI responds."
+
+
+def _ui_get_live_transcript_panel():
+    """
+    Return (status_html, transcript_text) for the Live transcript panel.
+    Shows a highlighted indicator when we detect a non-AI voice is present.
+    """
+    # Smooth the indicator a bit to avoid flicker (audio_callback toggles per chunk).
+    now = time_module.time()
+    human_voice_active = (someone_talking or (now - float(last_voice_detected) < 0.6)) and (not ai_is_speaking)
+
+    if human_voice_active:
+        status_html = """
+        <div style="
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #f59e0b;
+            background: #fffbeb;
+            color: #92400e;
+            font-family: ui-sans-serif, system-ui;
+            font-weight: 700;
+            margin-bottom: 8px;
+        ">
+          🎤 Someone is talking — <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">someone_talking=True</span>
+        </div>
+        """
+    else:
+        # Keep layout stable; show a subtle idle row.
+        status_html = """
+        <div style="
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            background: #f8fafc;
+            color: #64748b;
+            font-family: ui-sans-serif, system-ui;
+            font-weight: 600;
+            margin-bottom: 8px;
+        ">
+          Mic status: idle
+        </div>
+        """
+
+    return status_html, _ui_get_transcript()
 
 
 def _ui_run_local_party():
@@ -618,8 +865,28 @@ def build_ui():
                 stop_btn.click(fn=_ui_stop_session, inputs=[], outputs=[session_status])
 
                 gr.Markdown("---")
+                gr.Markdown("### 🔊 Live input meter (waveform + dB)")
+                gr.Markdown("Shows the signal captured by the **audio monitor** (host input device).")
+                with gr.Row():
+                    baseline_margin = gr.Slider(
+                        minimum=0,
+                        maximum=40,
+                        value=10,
+                        step=0.5,
+                        label="Talking margin (dB above baseline)",
+                    )
+                    set_baseline_btn = gr.Button("Set baseline", variant="secondary")
+                baseline_status = gr.Markdown(value="Set a baseline to calibrate voice detection for your room noise.")
+                set_baseline_btn.click(fn=_ui_set_baseline, inputs=[baseline_margin], outputs=[baseline_status])
+                baseline_margin.change(fn=_ui_set_margin, inputs=[baseline_margin], outputs=[baseline_status])
+                input_meter = gr.HTML(value=_ui_render_input_meter())
+                input_meter_timer = gr.Timer(value=0.2)
+                input_meter_timer.tick(fn=_ui_render_input_meter, inputs=[], outputs=[input_meter], show_progress="hidden")
+
+                gr.Markdown("---")
                 gr.Markdown("### 📝 Live transcript")
                 gr.Markdown("Conversation updates here as you speak and the AI replies.")
+                transcript_status = gr.HTML(value=_ui_get_live_transcript_panel()[0])
                 transcript_box = gr.Textbox(
                     label="Transcript",
                     value=_ui_get_transcript(),
@@ -629,7 +896,11 @@ def build_ui():
                     autoscroll=True,
                 )
                 transcript_timer = gr.Timer(value=1)
-                transcript_timer.tick(fn=_ui_get_transcript, inputs=[], outputs=[transcript_box])
+                transcript_timer.tick(
+                    fn=_ui_get_live_transcript_panel,
+                    inputs=[],
+                    outputs=[transcript_status, transcript_box],
+                )
 
             # -----------------------------------------------------------------
             # Tab 2: AI Party (internal routing, no Blackhole)
