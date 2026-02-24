@@ -1,57 +1,61 @@
 import sys
 import argparse
 import gradio as gr
-from fastrtc import ReplyOnPause, Stream, get_stt_model, WebRTC
 from loguru import logger
 from ollama import chat
-from fastrtc import StreamHandler
-from fastrtc import AdditionalOutputs
+from fastrtc import StreamHandler, AdditionalOutputs, ReplyOnPause, Stream, get_stt_model, WebRTC, AlgoOptions, SileroVadOptions
 from queue import Queue
 import numpy as np
 import asyncio
 import json
 import httpx
-from fastrtc import AlgoOptions, SileroVadOptions
-import gradio as gr
 from kokoro_onnx import Kokoro
-
-
+import os
+from dotenv import load_dotenv
+from whisper_stt import transcribe_on_pause
+import numpy as np
+import onnxruntime as ort
+from utilities2 import clean_text_for_tts, preprocess_audio, split_for_tts
+from fastrtc import get_tts_model, KokoroTTSOptions
+load_dotenv()
 
 OLLAMA_MODEL = "gemma3:4b"
-stt_model = get_stt_model()  # moonshine/base
+
+tts_model = get_tts_model()  # kokoro
 
 kokoro=Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
-#tts_model = get_tts_model()  # kokoro
-
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-LANGUAGE_STATE="English"
-VOICE_STATE="af_nicole"
-CONVERSATION_STATE=""
-
 voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
+
 def update_language(lang):
-    global LANGUAGE_STATE, VOICE_STATE
-    LANGUAGE_STATE = lang
-    print("Language updated to:", lang) #to remove later 
-    VOICE_STATE = voices_choices[lang][0]
-    print("Voice updated to:", VOICE_STATE) #to remove later
-    return gr.update(choices=voices_choices[lang], value=VOICE_STATE)
+    voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
+
+
+    return voices_choices[lang][0], gr.update(choices=voices_choices[lang], value=voices_choices[lang][0]), lang
+
 
 def update_voice(voice):
-    global VOICE_STATE
-    VOICE_STATE = voice
-    print("Voice updated to:", VOICE_STATE) #to remove later
+    return gr.update(value=voice), voice
 
-async def stream_tts(text):
-    global LANGUAGE_STATE, VOICE_STATE
+async def warmup_kokoro(kokoro):
+    async for _samples, _sr in kokoro.create_stream(
+        "hi", voice=voice_value, speed=1.0, lang="en-us"
+    ):
+        break  # just force first chunk 
+    logger.debug("Kokoro warmed up")
+
+warmup_kokoro(kokoro)
+
+            
+async def stream_tts(text, voice_value: str, language_value: str):
     async for samples, sr in kokoro.create_stream(
         text,
-        voice=VOICE_STATE,
+        voice=voice_value,
         speed=1.0,
-        lang=LANGUAGE_STATE=="Italian" and "it" or "en-us",
+        lang=language_value=="Italian" and "it" or "en-us",
     ):
         # Ensure (1, N)
         if samples.ndim == 1:
@@ -63,37 +67,74 @@ async def stream_tts(text):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
-async def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict]): # 
-    global CONVERSATION_STATE, LANGUAGE_STATE, VOICE_STATE
-    sample_rate, audio_array = audio
-    print("audio", audio)
-    print("string_identifier", string_identifier)
-    print("transformers_convo", transformers_convo)
+async def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
+    sample_rate, audio_array = preprocess_audio(*audio)
 
-
-    transcript = stt_model.stt(audio)
+    transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
+    if transcript is None:
+        print("No transcript")
+        return
     transformers_convo.append({"role": "user", "content": transcript})
+    conversation_value += "User: " + transcript + "\n"
     logger.debug(f"🎤 Transcript: {transcript}")
     response = chat(
         model="gemma3:4b",
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+LANGUAGE_STATE+".",
+                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_state.value+".",
             },
-            {"role": "user", "content": CONVERSATION_STATE},
+            {"role": "user", "content": conversation_value},
         ],
-        options={"num_predict": 200},
+        options={"num_predict": 100},
     )
-    response_text = response["message"]["content"]
+    response_text = clean_text_for_tts(response["message"]["content"])
     logger.debug(f"🤖 Response: {response_text}")
     transformers_convo.append({"role": "assistant", "content": response_text})
-    CONVERSATION_STATE += "User: " + transcript + "\n"
-    CONVERSATION_STATE += "AI (you are talking to the user): " + response_text + "\n"
+    conversation_value += "AI (you are talking to the user): " + response_text + "\n"
     
-    async for sr, audio_chunk in stream_tts(response_text):
-        yield (sr, audio_chunk), AdditionalOutputs(transformers_convo)
+    chunks = split_for_tts(response_text)
+    print("done")
+    try: 
+        for chunk in chunks:
+            async for sr, audio_chunk in stream_tts(chunk, voice_value, language_value):
+                yield (sr, audio_chunk), AdditionalOutputs(transformers_convo, conversation_value)
+    except Exception as e:
+        logger.error(f"Error in stream_tts: {e} for response: {response_text}")
+        yield (None, None), AdditionalOutputs(transformers_convo, conversation_value)
 
+
+ 
+def response2(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
+    sample_rate, audio_array = preprocess_audio(*audio)
+
+    transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
+    if transcript is None:
+        print("No transcript")
+        return
+    transformers_convo.append({"role": "user", "content": transcript})
+    conversation_value += "User: " + transcript + "\n"
+    logger.debug(f"🎤 Transcript: {transcript}")
+    response = chat(
+        model="gemma3:4b",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_state.value+".",
+            },
+            {"role": "user", "content": conversation_value},
+        ],
+        options={"num_predict": 100},
+    )
+    response_text = clean_text_for_tts(response["message"]["content"])
+    logger.debug(f"🤖 Response: {response_text}")
+    transformers_convo.append({"role": "assistant", "content": response_text})
+    conversation_value += "AI (you are talking to the user): " + response_text + "\n"
+    
+    chunks = split_for_tts(response_text)
+    print("done")
+    for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
+        yield audio_chunk, AdditionalOutputs(transformers_convo, conversation_value)
 
 with gr.Blocks(css="""
 .audio-container {
@@ -105,7 +146,7 @@ with gr.Blocks(css="""
 }
 """) as demo:
     language_state = gr.State("English")
-    voice_state = gr.State("af_nicole")
+    voice_state = gr.State("af_heart")
     conversation_state = gr.State("")
     transformers_convo = gr.State(value=[])
 
@@ -134,12 +175,12 @@ with gr.Blocks(css="""
     language_selector.change(
         fn=update_language,
         inputs=language_selector,
-        outputs=voice_selector
+        outputs=(voice_state, voice_selector, language_state)
     )
     voice_selector.change(
         fn=update_voice,
         inputs=voice_selector,
-        outputs=None
+        outputs= (voice_selector, voice_state)
     )
 
     with gr.Row():
@@ -153,22 +194,16 @@ with gr.Blocks(css="""
             transcript = gr.Chatbot(label="transcript", type="messages")
 
         audio.stream(fn=ReplyOnPause(
-        response,
-        algo_options=AlgoOptions(
-            audio_chunk_duration=0.6,
-            started_talking_threshold=0.2,
-            speech_threshold=0.1
-        ),
-        model_options=SileroVadOptions(
-            threshold=0.5,
-            min_speech_duration_ms=250,
-            min_silence_duration_ms=100
+        response2    ),
+        inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
+        outputs=[audio, conversation_state],
         )
-    ),
-    inputs=[audio, transformers_convo], outputs=[audio],
-    )
-    audio.on_additional_outputs(lambda s: s, # 
-                                outputs=[transcript],
-                                queue=False, show_progress="hidden")
-    demo.launch()
+        audio.on_additional_outputs(
+            lambda s, a: (s,a),
+            outputs=[transcript, conversation_state],
+            queue=False,
+            show_progress="hidden",
+        )  
+    
+    demo.launch(inbrowser=True)   
 
