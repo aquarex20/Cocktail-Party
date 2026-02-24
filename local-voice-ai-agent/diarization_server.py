@@ -21,10 +21,6 @@ except Exception:
     # isn't installed in that environment.
     app = None
 
-HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN")
-if not HUGGING_FACE_TOKEN:
-    raise ValueError("HUGGING_FACE_TOKEN is not set")
-
 _pipeline: Any | None = None
 _sessions: dict[str, IncrementalDiarizationSession] = {}
 _session_locks: dict[str, threading.Lock] = {}
@@ -53,6 +49,24 @@ REFINE_INTERVAL_S = _env_int("DIARIZATION_REFINE_INTERVAL_S", 10)
 REFINE_MIN_S = float(os.getenv("DIARIZATION_REFINE_MIN_S", "30"))
 REFINE_MAX_S = float(os.getenv("DIARIZATION_REFINE_MAX_S", "120"))
 STORE_MAX_S = float(os.getenv("DIARIZATION_STORE_MAX_S", "300"))
+
+
+def _pick_device() -> str:
+    """
+    Machine-dependent tuning knob (CPU/GPU):
+    - Set DIARIZATION_DEVICE=cpu to force CPU
+    - Set DIARIZATION_DEVICE=cuda to force NVIDIA GPU
+    - Set DIARIZATION_DEVICE=auto (default) to pick cuda when available
+    """
+    raw = str(os.getenv("DIARIZATION_DEVICE", "auto")).strip().lower()
+    if raw in {"auto", "default", ""}:
+        try:
+            import torch  # type: ignore
+
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            return "cpu"
+    return raw
 
 
 def _shift_segments_abs(payload: dict[str, Any] | None, offset_s: float) -> dict[str, Any] | None:
@@ -260,16 +274,8 @@ def _get_pipeline() -> Any | None:
                 "Set `HUGGING_FACE_TOKEN` (or `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN`)."
             )
 
-        device = "cpu"
-        try:
-            import torch  # type: ignore
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except Exception:
-            device = "cpu"
-
         # WhisperX diarization (pyannote) pipeline. No VAD here.
-        _pipeline = DiarizationPipeline(token=token, device=device)
+        _pipeline = DiarizationPipeline(token=token, device=_pick_device())
     return _pipeline
 
 
@@ -302,7 +308,7 @@ def diarize_audio_array(
     sample_rate: int,
 ) -> list[dict[str, Any]]:
     """
-    Call this directly from `voice_chat_2.py` right before transcription.
+    Call this from `voice_chat.py` right before transcription.
 
     `audio_array` must be mono 1D float32. (Your `preprocess_audio()` already does this.)
     """
@@ -402,14 +408,7 @@ if app is not None:
 
         def _work():
             try:
-                # Pick device consistently with diarization pipeline.
-                device = "cpu"
-                try:
-                    import torch  # type: ignore
-
-                    device = "cuda" if torch.cuda.is_available() else "cpu"
-                except Exception:
-                    device = "cpu"
+                device = _pick_device()
 
                 # 1) diarize this chunk + stable speaker mapping, return local df and offset
                 sess = _get_session(request.name)

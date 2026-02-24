@@ -1,15 +1,52 @@
 import numpy as np
+import os
 import torch
 import torchaudio
 import whisperx
-from fastrtc import ReplyOnPause
-from whisperx.diarize import DiarizationPipeline
+from dotenv import load_dotenv
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-asr = whisperx.load_model("small", device, compute_type="int8")
+load_dotenv()
+
+def _get_env(name: str, default: str) -> str:
+    v = os.getenv(name)
+    return default if v is None or str(v).strip() == "" else str(v).strip()
+
+
+def _pick_device() -> str:
+    """
+    WhisperX uses PyTorch. Device choice is machine-dependent:
+    - cpu: most compatible, slower
+    - cuda: NVIDIA GPU (fastest, if available)
+    - mps: Apple Silicon (sometimes supported depending on your stack)
+    """
+    raw = _get_env("WHISPERX_DEVICE", "auto").lower()
+    if raw in {"auto", "default"}:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return raw
+
+
+def _pick_compute_type(device: str) -> str:
+    """
+    WhisperX compute_type is a major CPU/GPU tuning knob.
+    Common values: int8 (CPU-friendly), float16 (GPU-friendly).
+    """
+    raw = _get_env("WHISPERX_COMPUTE_TYPE", "").lower()
+    if raw:
+        return raw
+    if device == "cuda":
+        return "float16"
+    return "int8"
+
+
+WHISPERX_MODEL = _get_env("WHISPERX_MODEL", "small")
+device = _pick_device()
+compute_type = _pick_compute_type(device)
+
+# Load once at import time (heavy). Tune with env vars above.
+asr = whisperx.load_model(WHISPERX_MODEL, device, compute_type=compute_type)
 
 TARGET_SR = 16000
-MIN_AUDIO_S = 0.12
+MIN_AUDIO_S = float(_get_env("WHISPER_MIN_AUDIO_S", "0.12"))
 
 def to_mono_f32(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x)

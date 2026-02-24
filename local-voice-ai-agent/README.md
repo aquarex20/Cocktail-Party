@@ -1,146 +1,165 @@
-# Local Voice AI Agent
+# CocktailPartyAI — Local Voice Agent (with diarization refinement)
 
-A real-time voice chat application powered by local AI models. This project allows you to have voice conversations with AI models like Gemma running locally on your machine.
+Real-time voice chat using local models (STT → LLM → TTS) plus an optional **diarization server** that assigns speaker labels (e.g. `SPK_00`, `SPK_01`) and runs a background **refinement loop** to improve speaker assignments over time.
 
-## Features
+## Capabilities
 
-- Real-time speech-to-text conversion
-- Local LLM inference using Ollama
-- Text-to-speech response generation
-- Web interface for interaction
-- Phone number interface option
+- **Real-time voice chat UI**: WebRTC audio in/out with a Gradio web UI (`voice_chat.py`)
+- **Local LLM**: runs via Ollama (default: `gemma3:4b`)
+- **Speech-to-text (STT)**: WhisperX-based transcription in `whisper_stt.py`
+- **Text-to-speech (TTS)**: Kokoro streaming output
+- **Optional diarization server**: FastAPI server (`diarization_server.py`) that
+  - diarizes each utterance and assigns speakers to words when transcript segments are provided
+  - keeps a rolling audio buffer per session
+  - periodically **re-runs diarization over recent audio** and updates stored utterances with `assigned_refined`
 
 ## Prerequisites
 
-- MacOS
-- [Ollama](https://ollama.ai/) - Run LLMs locally
-- [uv](https://github.com/astral-sh/uv) - Fast Python package installer and resolver
+- Python **3.11+**
+- [uv](https://github.com/astral-sh/uv) for dependency management
+- [Ollama](https://ollama.ai/) for running the local LLM
+- Optional: an NVIDIA GPU (CUDA) if you want GPU acceleration for diarization / WhisperX
 
 ## Installation
 
-### 1. Install prerequisites with Homebrew
+From `Cocktail-Party/local-voice-ai-agent/`:
 
 ```bash
-brew install ollama
-brew install uv
-```
-
-### 2. Clone the repository
-
-```bash
-git clone https://github.com/jesuscopado/local-voice-ai-agent.git
-cd local-voice-ai-agent
-```
-
-### 3. Set up Python environment and install dependencies
-
-```bash
+brew install uv ollama
 uv venv
 source .venv/bin/activate
 uv sync
 ```
 
-**Optional – Italian speech-to-text:** If you use the Language setting **Italian**, install the optional Whisper-based STT so the app can transcribe Italian speech:
+This folder expects the Kokoro weights to be present:
+- `kokoro-v1.0.onnx`
+- `voices-v1.0.bin`
+
+Download the LLM in Ollama:
 
 ```bash
-uv sync --extra italian-stt
-```
-
-Or with pip: `pip install ".[italian-stt]"` (installs `torch`, `torchaudio`, and `transformers`).  
-The first time you use Italian, the Whisper model (~967MB) is downloaded once and stored under `local-voice-ai-agent/.cache/whisper`; later runs reuse it and do not re-download.
-
-### 4. Download required models in Ollama
-
-```bash
-ollama pull gemma3:1b
-# For advanced version
 ollama pull gemma3:4b
 ```
 
-## Usage
+## Configuration
 
-### Basic Voice Chat
-
-```bash
-python local_voice_chat.py
-```
-
-### Advanced Voice Chat (with system prompt)
-
-#### Web UI (default)
-```bash
-python local_voice_chat_advanced.py
-```
-
-#### Phone Number Interface
-Get a temporary phone number that anyone can call to interact with your AI:
-```bash
-python local_voice_chat_advanced.py --phone
-```
-
-### Audio device configuration (optional)
-
-You can choose which audio input and output devices to use instead of relying on system defaults.
-
-- **Without options**: Uses your system default input/output (e.g. built-in mic and speakers).
-- **With options**: Set devices explicitly for the “party” setup (BlackHole + Script Config).
-
-Examples:
-```bash
-# Use BlackHole 2ch as input and device index 1 as output
-python local_voice_chat_advanced.py --input-device "BlackHole 2ch" --output-device 1
-
-# Testing mode: lists devices, explains config, can run local_party.py, then starts session
-python local_voice_chat_advanced.py --testing
-
-# Testing with devices pre-set
-python local_voice_chat_advanced.py --input-device "BlackHole 2ch" --output-device "Your Headphones" --testing
-```
-
-**Testing mode** (`--testing`): Runs a short setup flow that (1) explains how `local_party.py` and `local_voice_chat_advanced.py` share audio, (2) lists available input/output devices, (3) lets you type input/output device names or indices, (4) optionally starts `local_party.py` in the background so you can test that you hear both the script and the AI on the same output, and (5) reminds you to check system sound settings if something is wrong. After you press Enter, the voice chat session starts.
-
-**How the two apps fit together:**
-
-- **local_party.py** (Script Player) outputs to **Script Config** (a multi-output device that sends to **BlackHole 2ch** and to your **headphones/speakers**).
-- **local_voice_chat_advanced.py** takes **BlackHole 2ch** as *input* and your **headphones/speakers** as *output*.
-
-Use the **same output device** (your headphones/speakers) for both so you hear the script and the AI in one place. If you can’t hear properly, check:
-
-1. System sound output is set to your headphones/speakers.
-2. In Audio MIDI Setup, **Script Config** includes that same device.
-3. This app’s `--output-device` is set to that same device.
-
-### Blackhole config for party
-
-Open **Audio MIDI Setup** on Mac (or equivalent multi-output device settings elsewhere). Create a new **Multi-Output Device**. In that device, select as outputs: **BlackHole 2ch** and your **headphones** (or desired output). Name it **Script Config** (or anything you like, and update `sd.default.device` in `local_party.py` to match). Set your Mac’s sound output to **Script Config**. You can comment out the `sd.default.device` lines in both files if you prefer to use system default for testing.
-
-### AI Party: multiple AIs talking to each other
-
-The app includes an **AI Party** tab that runs 2–4 AI agents conversing with each other via **internal audio routing** (no Blackhole or virtual devices):
-
-- Each agent: STT → LLM → TTS
-- Agent A's TTS output is fed directly to Agent B's "mic" (and vice versa) via an in-process `AudioBus`
-- Docker-friendly, works on any platform
-- Optional: monitor all agents to your headphones
-
-### Docker (optional)
-
-A `Dockerfile` and `docker-compose.yml` are provided for running the web UI in a container. Full audio personalization (Blackhole, voice chat) requires macOS; use the native app for AI Party.
+Create a local `.env` (do not commit it):
 
 ```bash
-docker compose up --build
+cp .env.example .env
 ```
 
-## How it works
+- **Hugging Face token (required for diarization)**: WhisperX diarization uses pyannote models hosted on Hugging Face; you must set `HUGGING_FACE_TOKEN` (or `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN`) in `.env` for diarization to work.
+- **CPU/GPU tuning**:
+  - `DIARIZATION_DEVICE=auto|cpu|cuda`
+  - `WHISPERX_DEVICE=auto|cpu|cuda|mps`
+  - `WHISPERX_COMPUTE_TYPE=int8|float16|float32`
+  - `WHISPERX_MODEL=small|medium|...`
 
-The application uses:
-- `FastRTC` for WebRTC communication
-- `Moonshine` for local speech-to-text conversion
-- `Kokoro` for text-to-speech synthesis
-- `Ollama` for running local LLM inference with `Gemma` models
+## Running
 
-When you speak, your audio is:
-1. Transcribed to text using Moonshine
-2. Sent to a local LLM via Ollama for processing
-3. The LLM response is converted back to speech with Kokoro
-4. The audio response is streamed back to you via FastRTC
+### 1) Start the diarization server (optional but recommended)
+
+```bash
+source .venv/bin/activate
+uvicorn diarization_server:app --host 127.0.0.1 --port 8001
+```
+
+Notes:
+- If the Hugging Face token is missing, diarization requests will fail and the server will store an error for the affected utterances.
+- The refinement loop runs automatically on server startup (see env vars below).
+
+### 2) Start the voice chat UI
+
+```bash
+source .venv/bin/activate
+python voice_chat.py
+```
+
+The UI posts utterances to the diarization server via `DIARIZATION_SERVER_URL` (defaults to `http://127.0.0.1:8001`).
+
+## How it works (high level)
+
+1. The browser streams audio via WebRTC.
+2. `ReplyOnPause` detects an end-of-turn pause and triggers `response(...)`.
+3. `whisper_stt.py` transcribes the accumulated audio (WhisperX).
+4. The transcript is sent to the local LLM via Ollama.
+5. The answer is streamed back as audio using Kokoro TTS.
+6. In parallel, `voice_chat.py` sends audio + transcript segments to `diarization_server.py` (fire-and-forget).
+7. The server stores `assigned` speaker labels for the utterance, then periodically refines recent history and updates `assigned_refined`.
+
+## Diarization refinement loop (server)
+
+`diarization_server.py` keeps a rolling audio buffer per session and runs a background thread that:
+- re-diarizes the most recent window of audio
+- remaps speakers to stable “global” speaker IDs
+- re-assigns word speakers for stored utterances that overlap the refine window (`assigned_refined`)
+
+Environment variables:
+- `DIARIZATION_REFINE_INTERVAL_S` (default `10`): how often refinement runs
+- `DIARIZATION_REFINE_MIN_S` (default `30`): minimum buffered audio required before refining
+- `DIARIZATION_REFINE_MAX_S` (default `120`): rolling window size for refinement
+- `DIARIZATION_STORE_MAX_S` (default `300`): how much audio to keep per session
+
+## Machine-dependent performance tuning (CPU vs GPU)
+
+Some defaults are chosen for broad compatibility (often CPU-friendly). Depending on your machine, you may want to tune:
+
+- **WhisperX STT** (`whisper_stt.py`):
+  - `WHISPERX_MODEL` (bigger = better accuracy, slower)
+  - `WHISPERX_DEVICE` and `WHISPERX_COMPUTE_TYPE` (e.g. `cuda + float16` for GPUs, `cpu + int8` for CPUs)
+  - `WHISPER_MIN_AUDIO_S` to control how short utterances are ignored
+- **Diarization server** (`diarization_server.py`):
+  - `DIARIZATION_DEVICE` to force CPU or GPU
+  - refinement window settings (`DIARIZATION_REFINE_*`) to trade latency/compute for higher-quality speaker assignments
+
+## Legacy / experimental scripts
+
+- `voice_chat_legacy.py`: older UI version kept for reference.
+- `old_stuff/`: older prototypes and experiments (not kept in sync with the current entrypoints).
+
+## Next steps (future improvements): adaptive pause detection / turn-taking
+
+Right now, the “when should the AI answer?” behavior is mainly controlled by **pause detection**: `FastRTC`’s `ReplyOnPause` accumulates audio and triggers your reply callback when it decides the user has paused/stopped speaking.
+
+In real cocktail-party settings (noise, cross-talk, interruptions, fast back-and-forth), a single fixed configuration is rarely optimal. A strong next step is to **tune these parameters dynamically during a conversation** based on:
+- background noise level / mic gain
+- whether multiple speakers are talking over each other
+- interaction style (“quick banter” vs “thoughtful long answers”)
+- how often the user gets “cut off” vs how often the AI feels sluggish to respond
+
+Below are the two configuration classes (as defined in `fastrtc`) that govern this behavior.
+
+### `AlgoOptions` (pause-detection algorithm settings)
+
+Defined in `fastrtc/reply_on_pause.py`.
+
+- **`audio_chunk_duration` (float, seconds)**: how much audio must accumulate before the VAD check is run on that buffer. Larger values generally mean the system **waits longer** before concluding “pause detected”, at the cost of latency.
+- **`started_talking_threshold` (float, seconds)**: if the VAD estimates more than this much speech inside the current chunk, the user is considered to have **started talking** (helps avoid triggering on tiny noises).
+- **`speech_threshold` (float, seconds)**: after “started talking” is true, if the VAD estimates *less* speech than this inside the chunk, it is treated as **stopped speaking / pause detected** (smaller values usually make it less eager to stop).
+- **`max_continuous_speech_s` (float, seconds)**: a safety cap; if continuous speech reaches this duration, the handler triggers even if a pause is not detected (useful to prevent never-ending utterances).
+
+### `SileroVadOptions` (Silero VAD model settings)
+
+Defined in `fastrtc/pause_detection/silero.py`. These settings affect how raw audio is labeled as speech vs silence.
+
+- **`threshold` (float)**: Silero outputs a speech probability per window; probabilities **above** this are treated as speech. Higher = stricter (can miss quiet speech); lower = more sensitive (can treat noise as speech).
+- **`min_speech_duration_ms` (int, ms)**: detected speech segments shorter than this are discarded (filters out clicks / tiny bursts).
+- **`max_speech_duration_s` (float, seconds)**: splits very long speech segments (primarily relevant for segmenting long recordings).
+- **`min_silence_duration_ms` (int, ms)**: how long silence must persist at the end of a segment before the segment is closed (helps handle hesitation/short pauses).
+- **`window_size_samples` (int, samples @ 16kHz)**: VAD analysis window size. Silero is typically trained for `512`, `1024`, or `1536` at 16kHz; other values can hurt performance.
+- **`speech_pad_ms` (int, ms)**: padding added around detected speech segments to reduce overly-tight cuts.
+
+### Where these are applied
+
+`ReplyOnPause` accepts both as parameters:
+
+```python
+ReplyOnPause(
+    fn=your_reply_fn,
+    algo_options=AlgoOptions(...),
+    model_options=SileroVadOptions(...),
+)
+```
+
+In this repo, `voice_chat.py` constructs `ReplyOnPause(response, algo_options=..., model_options=...)` so you can tune it per environment.
