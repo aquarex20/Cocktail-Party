@@ -67,45 +67,8 @@ async def stream_tts(text, voice_value: str, language_value: str):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
-async def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
-    sample_rate, audio_array = preprocess_audio(*audio)
-
-    transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
-    if transcript is None:
-        print("No transcript")
-        return
-    transformers_convo.append({"role": "user", "content": transcript})
-    conversation_value += "User: " + transcript + "\n"
-    logger.debug(f"🎤 Transcript: {transcript}")
-    response = chat(
-        model="gemma3:4b",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a Cocktail Party event. Your goal is to answer the user and be helpful. Your output will be converted to audio so don't include emojis or special characters in your answers. Respond to what the user said in a creative and helpful way in "+language_state.value+".",
-            },
-            {"role": "user", "content": conversation_value},
-        ],
-        options={"num_predict": 100},
-    )
-    response_text = clean_text_for_tts(response["message"]["content"])
-    logger.debug(f"🤖 Response: {response_text}")
-    transformers_convo.append({"role": "assistant", "content": response_text})
-    conversation_value += "AI (you are talking to the user): " + response_text + "\n"
-    
-    chunks = split_for_tts(response_text)
-    print("done")
-    try: 
-        for chunk in chunks:
-            async for sr, audio_chunk in stream_tts(chunk, voice_value, language_value):
-                yield (sr, audio_chunk), AdditionalOutputs(transformers_convo, conversation_value)
-    except Exception as e:
-        logger.error(f"Error in stream_tts: {e} for response: {response_text}")
-        yield (None, None), AdditionalOutputs(transformers_convo, conversation_value)
-
-
  
-def response2(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
+def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
     sample_rate, audio_array = preprocess_audio(*audio)
 
     transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
@@ -194,7 +157,7 @@ with gr.Blocks(css="""
             transcript = gr.Chatbot(label="transcript", type="messages")
 
         audio.stream(fn=ReplyOnPause(
-        response2    ),
+        response    ),
         inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
         outputs=[audio, conversation_state],
         )
