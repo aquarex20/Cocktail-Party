@@ -8,7 +8,8 @@ import threading
 import time
 import numpy as np
 from pydantic import BaseModel, Field
-
+import dotenv
+dotenv.load_dotenv()
 from diarization import IncrementalDiarizationSession
 
 try:
@@ -20,6 +21,9 @@ except Exception:
     # isn't installed in that environment.
     app = None
 
+HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN")
+if not HUGGING_FACE_TOKEN:
+    raise ValueError("HUGGING_FACE_TOKEN is not set")
 
 _pipeline: Any | None = None
 _sessions: dict[str, IncrementalDiarizationSession] = {}

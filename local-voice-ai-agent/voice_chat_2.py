@@ -12,6 +12,7 @@ import httpx
 import threading
 import base64
 import secrets
+import copy
 from kokoro_onnx import Kokoro
 import os
 from dotenv import load_dotenv
@@ -38,6 +39,73 @@ voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "a
 DIARIZATION_SERVER_URL = os.getenv("DIARIZATION_SERVER_URL", "http://127.0.0.1:8001")
 SESSION_ID = secrets.token_urlsafe(12)
 
+def get_diarization_utterances(session_id: str) -> dict:
+    response = httpx.get(f"{DIARIZATION_SERVER_URL}/diarize/utterances/{session_id}")
+    #print(f"Diarization utterances: {response.json()}")
+    return response.json()
+def _speaker_runs_from_assigned(assigned: dict | None):
+    """
+    Returns list of {"speaker": str, "text": str} runs in order.
+    """
+    if not isinstance(assigned, dict):
+        return []
+
+    runs = []
+    cur_spk = None
+    cur_words = []
+
+    for seg in assigned.get("segments") or []:
+        words = seg.get("words") or []
+        for w in words:
+            spk = w.get("speaker") or seg.get("speaker") or "unassigned"
+            token = (w.get("word") or "").strip()
+            if not token:
+                continue
+
+            if cur_spk is None:
+                cur_spk, cur_words = spk, [token]
+            elif spk == cur_spk:
+                cur_words.append(token)
+            else:
+                runs.append({"speaker": cur_spk, "text": " ".join(cur_words)})
+                cur_spk, cur_words = spk, [token]
+
+    if cur_spk is not None and cur_words:
+        runs.append({"speaker": cur_spk, "text": " ".join(cur_words)})
+
+    return runs
+
+
+def explode_user_message_by_speaker_runs(transformers_convo: list[dict], utterances: dict) -> list[dict]:
+    out = []
+    print(f"Exploding user message by speaker runs: {utterances}")
+    for m in transformers_convo or []:
+        if m.get("role") != "user":
+            out.append(m)
+            continue
+
+        rid = m.get("reply_id")
+        u = (utterances or {}).get(rid) or {}
+        assigned = u.get("assigned_refined") or u.get("assigned")
+
+        runs = _speaker_runs_from_assigned(assigned)  # from earlier snippet
+
+        if not runs:
+            out.append({**m, "speaker_label": "unassigned"})
+            continue
+
+        # Replace the single message with multiple messages at same position
+        for r in runs:
+            out.append(
+                {
+                    **m,
+                    "speaker_label": r["speaker"],
+                    "content": r["text"],
+                    "reply_id": rid,
+                }
+            )
+
+    return out
 
 def enqueue_diarization(
     session_id: str,
@@ -67,7 +135,7 @@ def enqueue_diarization(
                     "whisper_segments": whisper_segments,
                     "language": language_code,
                 },
-                timeout=0.2,
+                timeout=2,
             )
         except Exception:
             pass
@@ -181,6 +249,24 @@ def render_bubbles(messages):
     messages: list of dicts like {"role": "user"|"assistant", "content": "..."}
     returns: HTML string to put inside gr.Markdown
     """
+    def _user_bg_for_label(label: str | None) -> str:
+        import hashlib
+
+        if not label or label == "unassigned":
+            return "#555555"
+
+        palette = [
+            "#2b2b2b",  # charcoal
+            "#1f4d7a",  # deep blue
+            "#1f6b5a",  # teal
+            "#5a2a6b",  # purple
+            "#6b2a2a",  # maroon
+            "#4a5d23",  # olive
+            "#2a5a6b",  # blue-teal
+        ]
+        h = hashlib.md5(label.encode("utf-8")).hexdigest()
+        return palette[int(h[:8], 16) % len(palette)]
+
     out = ["""
     <div style="
       height:420px;
@@ -196,13 +282,20 @@ def render_bubbles(messages):
     for m in messages:
         role = m.get("role", "assistant")
         text = html.escape(str(m.get("content", "") or ""))
+        speaker_label = m.get("speaker_label")
+        header_label = "AI" if role != "user" else (speaker_label or "unassigned")
+        header_label = html.escape(str(header_label))
 
         if role == "user":
+            bg = _user_bg_for_label(str(speaker_label) if speaker_label is not None else None)
             out.append(
                 "<div style='display:flex;justify-content:flex-end;'>"
-                "<div style='max-width:75%;background:#2b2b2b;color:#fff;"
+                "<div style='max-width:75%;background:"
+                f"{bg}"
+                ";color:#fff;"
                 "padding:10px 12px;border-radius:16px 16px 4px 16px;"
                 "white-space:pre-wrap;word-wrap:break-word;'>"
+                f"<div style='font-size:11px;opacity:0.9;margin-bottom:6px;font-weight:600;'>{header_label}</div>"
                 f"{text}</div></div>"
             )
         else:
@@ -211,6 +304,7 @@ def render_bubbles(messages):
                 "<div style='max-width:75%;background:#f2f2f2;color:#111;"
                 "padding:10px 12px;border-radius:16px 16px 16px 4px;"
                 "white-space:pre-wrap;word-wrap:break-word;'>"
+                f"<div style='font-size:11px;opacity:0.8;margin-bottom:6px;font-weight:600;color:#555;'>{header_label}</div>"
                 f"{text}</div></div>"
             )
 
@@ -294,10 +388,11 @@ with gr.Blocks(css="""
             timer.tick(update_html, inputs=[transformers_convo], outputs=[chat_md])
 
             timer_diarization=gr.Timer(2.0)
-            def update_diarization(transformers_convo):
-                diarization_segments = get_diarization_segments(transformers_convo)
-                return render_diarization(transformers_convo)
-            timer_diarization.tick(update_diarization, inputs=[transformers_convo], outputs=[diarization_md])
+            def update_convo_with_diarization(transformers_convo):
+                diarization_utterances = get_diarization_utterances(SESSION_ID)
+                new_convo = explode_user_message_by_speaker_runs(transformers_convo, diarization_utterances)
+                return new_convo
+            timer_diarization.tick(update_convo_with_diarization, inputs=[transformers_convo], outputs=[transformers_convo])
         audio.stream(fn=ReplyOnPause(
         response    ),
         inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
