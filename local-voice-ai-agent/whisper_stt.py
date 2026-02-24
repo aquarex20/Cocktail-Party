@@ -29,7 +29,11 @@ def resample(x: np.ndarray, sr: int, target_sr: int = TARGET_SR) -> np.ndarray:
     t = torchaudio.functional.resample(t, sr, target_sr)
     return t.squeeze(0).cpu().numpy()
 
-def transcribe_on_pause(audio: tuple[int, np.ndarray], language: str):
+def transcribe_on_pause(
+    audio: tuple[int, np.ndarray],
+    language: str,
+    return_segments: bool = False,
+):
     sr, x = audio
     #flip x dimensions
     x = x.reshape(-1)
@@ -43,5 +47,10 @@ def transcribe_on_pause(audio: tuple[int, np.ndarray], language: str):
 
     # OPTIONAL: if you always know the language, set it to avoid detect + the “<30s” warning
     result = asr.transcribe(x16, language=language)  # or "it"
-    text = " ".join(seg["text"].strip() for seg in result["segments"]).strip()
+    segments = result.get("segments", []) or []
+    text = " ".join(seg.get("text", "").strip() for seg in segments).strip()
+
+    if return_segments:
+        return text, segments, (result.get("language") or language)
+
     return text

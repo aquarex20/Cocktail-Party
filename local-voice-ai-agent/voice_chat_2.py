@@ -11,6 +11,7 @@ import json
 import httpx
 import threading
 import base64
+import secrets
 from kokoro_onnx import Kokoro
 import os
 from dotenv import load_dotenv
@@ -21,7 +22,6 @@ from utilities import clean_text_for_tts, preprocess_audio, split_for_tts
 from fastrtc import get_tts_model, KokoroTTSOptions
 import html
 import time
-import secrets
 
 load_dotenv()
 
@@ -36,9 +36,17 @@ logger.add(sys.stderr, level="DEBUG")
 voices_choices={"English": ["af_heart", "af_bella","af_nicole", "am_michael", "am_puck"], "Italian": ["if_sara", "im_nicola"]}
 
 DIARIZATION_SERVER_URL = os.getenv("DIARIZATION_SERVER_URL", "http://127.0.0.1:8001")
+SESSION_ID = secrets.token_urlsafe(12)
 
 
-def enqueue_diarization(session_id: str, audio_array: np.ndarray, sample_rate: int) -> None:
+def enqueue_diarization(
+    session_id: str,
+    utterance_id: str,
+    audio_array: np.ndarray,
+    sample_rate: int,
+    whisper_segments: list[dict] | None,
+    language_code: str,
+) -> None:
     """
     Fire-and-forget diarization: send audio to the FastAPI server without blocking UI/audio.
     """
@@ -50,11 +58,14 @@ def enqueue_diarization(session_id: str, audio_array: np.ndarray, sample_rate: i
     def _post():
         try:
             httpx.post(
-                f"{DIARIZATION_SERVER_URL}/diarize/ingest",
+                f"{DIARIZATION_SERVER_URL}/diarize/ingest_assign",
                 json={
                     "name": session_id or "default",
+                    "utterance_id": utterance_id,
                     "sample_rate": int(sample_rate),
                     "audio_f32_b64": payload_b64,
+                    "whisper_segments": whisper_segments,
+                    "language": language_code,
                 },
                 timeout=0.2,
             )
@@ -124,14 +135,20 @@ def _validate_chatbot_messages(msgs):
 
 def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
     sample_rate, audio_array = preprocess_audio(*audio)
-    reply_id = secrets.token_urlsafe(12)  # e.g. "Y2v8oH8p0oH7Jx4k"
-    # Non-blocking diarization (server-side).
-    enqueue_diarization(reply_id, audio_array, sample_rate)
+    reply_id = secrets.token_urlsafe(12)
 
-    transcript =transcribe_on_pause((sample_rate, audio_array), language_value=="Italian" and "it" or "en")
+    transcript, whisper_segments, lang_code = transcribe_on_pause(
+        (sample_rate, audio_array),
+        language_value == "Italian" and "it" or "en",
+        return_segments=True,
+    )
     if transcript is None:
         print("No transcript")
         return
+
+    # Non-blocking server-side: diarize + align + assign word speakers.
+    enqueue_diarization(SESSION_ID, reply_id, audio_array, sample_rate, whisper_segments, lang_code)
+
     new_convo=transformers_convo+[{"role": "user", "content": transcript, "reply_id": reply_id}]
     conversation_value += "User: " + transcript + "\n"
 
