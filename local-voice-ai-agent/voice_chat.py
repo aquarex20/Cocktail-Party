@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from whisper_stt import transcribe_on_pause
 import numpy as np
 import onnxruntime as ort
-from utilities2 import clean_text_for_tts, preprocess_audio, split_for_tts
+from utilities import clean_text_for_tts, preprocess_audio, split_for_tts
 from fastrtc import get_tts_model, KokoroTTSOptions
 load_dotenv()
 
