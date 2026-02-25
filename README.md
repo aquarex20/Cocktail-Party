@@ -24,7 +24,7 @@ Real-time voice chat using local models (STT → LLM → TTS) plus an optional *
 
 ## Installation
 
-From `Cocktail-Party/local-voice-ai-agent/`:
+From `Cocktail-Party/`:
 
 ```bash
 brew install uv ollama
@@ -115,11 +115,6 @@ Some defaults are chosen for broad compatibility (often CPU-friendly). Depending
   - `DIARIZATION_DEVICE` to force CPU or GPU
   - refinement window settings (`DIARIZATION_REFINE_*`) to trade latency/compute for higher-quality speaker assignments
 
-## Legacy / experimental scripts
-
-- `voice_chat_legacy.py`: older UI version kept for reference.
-- `old_stuff/`: older prototypes and experiments (not kept in sync with the current entrypoints).
-
 ## Next steps (future improvements): adaptive pause detection / turn-taking
 
 Right now, the “when should the AI answer?” behavior is mainly controlled by **pause detection**: `FastRTC`’s `ReplyOnPause` accumulates audio and triggers your reply callback when it decides the user has paused/stopped speaking.
@@ -165,3 +160,18 @@ ReplyOnPause(
 ```
 
 In this repo, `voice_chat.py` constructs `ReplyOnPause(response, algo_options=..., model_options=...)` so you can tune it per environment.
+
+## Advanced (bonus): advanced audio config + “AI Party” (multiple AIs)
+
+If you want more **advanced audio configuration** and a fun mode where **multiple AIs talk to each other**, use the bonus script in `advanced/` (this folder is meant as a small, self-contained playground “for fun”):
+
+```bash
+cd advanced
+python local_voice_chat_advanced.py
+```
+
+Important:
+- Keep these files **inside `advanced/`** (the script looks for them there):
+  - `advanced/kokoro-v1.0.onnx`
+  - `advanced/voices-v1.0.bin`
+- In the Gradio UI, go to the **“AI Party”** tab to run multiple AIs that speak with each other (or use **“Single Agent”** for one-on-one).
