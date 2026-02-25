@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.31">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>project_overview</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="PROJECT_OVERVIEW_files/libs/clipboard/clipboard.min.js"></script>
+<script src="PROJECT_OVERVIEW_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="PROJECT_OVERVIEW_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="PROJECT_OVERVIEW_files/libs/quarto-html/popper.min.js"></script>
+<script src="PROJECT_OVERVIEW_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="PROJECT_OVERVIEW_files/libs/quarto-html/anchor.min.js"></script>
+<link href="PROJECT_OVERVIEW_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="PROJECT_OVERVIEW_files/libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="PROJECT_OVERVIEW_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="PROJECT_OVERVIEW_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="PROJECT_OVERVIEW_files/libs/bootstrap/bootstrap-81267100e462c21b3d6c0d5bf76a3417.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="vue-densemble-du-projet-cocktailpartyai" class="level1">
+<h1>📁 Vue d’ensemble du projet CocktailPartyAI</h1>
+<section id="objectif-global" class="level2">
+<h2 class="anchored" data-anchor-id="objectif-global">🎯 Objectif global</h2>
+<p>Ce projet permet l’<strong>analyse multimodale</strong> (audio + vidéo) pour :</p>
+<ul>
+<li>Détecter qui parle dans une conversation (Cocktail Party Problem)</li>
+<li>Analyser les mouvements de bouche</li>
+<li>Combiner analyse audio (diarisation) et visuelle (détection de visage)</li>
+</ul>
+<hr>
+</section>
+<section id="structure-des-fichiers" class="level2">
+<h2 class="anchored" data-anchor-id="structure-des-fichiers">📂 Structure des fichiers</h2>
+<section id="fichiers-principaux---scripts-python" class="level3">
+<h3 class="anchored" data-anchor-id="fichiers-principaux---scripts-python">🔴 <strong>FICHIERS PRINCIPAUX - Scripts Python</strong></h3>
+<section id="video_analysis_template.py-complet" class="level4">
+<h4 class="anchored" data-anchor-id="video_analysis_template.py-complet">1. <strong><code>video_analysis_template.py</code></strong> ⭐ COMPLET</h4>
+<p><strong>Rôle:</strong> Template principal complet avec architecture modulaire</p>
+<p><strong>Ce qu’il fait:</strong></p>
+<ul>
+<li>🎭 Détecte les visages avec MediaPipe Face Detection</li>
+<li>👄 Analyse les mouvements de bouche avec MediaPipe Face Mesh</li>
+<li>🗣️ Détecte qui parle en calculant le MAR (Mouth Aspect Ratio)</li>
+<li>🎤 Inclut une classe AudioAnalyzer (pour intégration audio future)</li>
+<li>💾 Peut sauvegarder la vidéo analysée</li>
+</ul>
+<p><strong>Architecture:</strong></p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>VideoAnalyzer           <span class="co"># Classe principale</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>├─ FaceDetector        <span class="co"># Détection des visages</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>├─ MouthMovementDetector  <span class="co"># Détection ouverture bouche</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>└─ AudioAnalyzer       <span class="co"># Analyse audio (optionnel)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> video_analysis_template.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Fonctionnalités:</strong></p>
+<ul>
+<li>Webcam OU fichier vidéo</li>
+<li>Détection multi-visages (jusqu’à 5)</li>
+<li>Annotations visuelles (boîtes vertes = parle, rouges = silencieux)</li>
+<li>Export vidéo annotée</li>
+</ul>
+<hr>
+</section>
+<section id="simple_video_demo.py-simple-rapide" class="level4">
+<h4 class="anchored" data-anchor-id="simple_video_demo.py-simple-rapide">2. <strong><code>simple_video_demo.py</code></strong> ⚡ SIMPLE &amp; RAPIDE</h4>
+<p><strong>Rôle:</strong> Version simplifiée pour tests rapides</p>
+<p><strong>Ce qu’il fait:</strong></p>
+<ul>
+<li>Version minimaliste du template complet</li>
+<li>Même fonctionnalités de base mais code plus court</li>
+<li>Idéal pour prototypage rapide</li>
+</ul>
+<p><strong>Différence avec template complet:</strong></p>
+<ul>
+<li>❌ Pas de classes séparées (tout dans une classe)</li>
+<li>❌ Pas d’AudioAnalyzer</li>
+<li>❌ Architecture moins modulaire</li>
+<li>✅ Plus rapide à comprendre</li>
+<li>✅ Moins de lignes de code</li>
+</ul>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> simple_video_demo.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="mouth_open_detector.py-nouveau---version-basique" class="level4">
+<h4 class="anchored" data-anchor-id="mouth_open_detector.py-nouveau---version-basique">3. <strong><code>mouth_open_detector.py</code></strong> 👄 NOUVEAU - Version basique</h4>
+<p><strong>Rôle:</strong> Détection SPÉCIFIQUE de l’ouverture de bouche</p>
+<p><strong>Ce qu’il fait:</strong></p>
+<ul>
+<li>Se concentre UNIQUEMENT sur la détection de bouche ouverte/fermée</li>
+<li>Calcule le MAR en temps réel</li>
+<li>Affiche les landmarks de la bouche</li>
+<li>Contrôles interactifs pour ajuster le seuil</li>
+</ul>
+<p><strong>Avantages:</strong></p>
+<ul>
+<li>✅ Code focalisé sur une seule tâche</li>
+<li>✅ Visualisation des points de la bouche</li>
+<li>✅ Ajustement seuil en direct (+/-)</li>
+<li>✅ Rapide et léger</li>
+</ul>
+<p><strong>Limitations:</strong></p>
+<ul>
+<li>⚠️ Perd les visages éloignés (&lt; 100px)</li>
+<li>⚠️ Pas de filtrage temporel (peut flicker)</li>
+</ul>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> mouth_open_detector.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Contrôles:</strong></p>
+<ul>
+<li><code>+</code> / <code>-</code> : Ajuster seuil MAR</li>
+<li><code>l</code> : Afficher/cacher landmarks bouche</li>
+<li><code>q</code> : Quitter</li>
+</ul>
+<hr>
+</section>
+<section id="mouth_open_detector_improved.py-nouveau---version-avancée" class="level4">
+<h4 class="anchored" data-anchor-id="mouth_open_detector_improved.py-nouveau---version-avancée">4. <strong><code>mouth_open_detector_improved.py</code></strong> 🚀 NOUVEAU - Version avancée</h4>
+<p><strong>Rôle:</strong> Détection d’ouverture de bouche avec OPTIMISATIONS pour visages éloignés</p>
+<p><strong>Ce qu’il fait:</strong></p>
+<ul>
+<li>Tout ce que fait la version basique +</li>
+<li>🔍 <strong>Zoom automatique</strong> sur les petits visages</li>
+<li>📊 <strong>Détection multi-échelle</strong></li>
+<li>🎯 <strong>Filtrage temporel</strong> (anti-flickering)</li>
+<li>📈 <strong>Calcul MAR robuste</strong> sur 9 points au lieu de 4</li>
+<li>📍 <strong>Pré-détection</strong> avec Face Detection avant Face Mesh</li>
+</ul>
+<p><strong>Architecture avancée:</strong></p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>ImprovedMouthOpenDetector</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>├─ detect_faces_locations()     <span class="co"># Pré-détection rapide</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>├─ upscale_face_roi()           <span class="co"># Zoom sur petits visages</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>├─ calculate_mouth_ratio_robust() <span class="co"># MAR sur 9 points</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>├─ smooth_mouth_state()         <span class="co"># Filtrage temporel</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>└─ process_single_face()        <span class="co"># Traitement individuel</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Algorithme:</strong></p>
+<pre><code>1. Face Detection → Trouve les visages (rapide)
+2. Pour chaque visage:
+   - Si taille &lt; 80px → Zoom x2-x3
+   - Face Mesh sur ROI agrandie
+   - Calcul MAR robuste (moyenne 9 points)
+   - Filtrage temporel (vote sur 5 frames)
+3. Décision lissée</code></pre>
+<p><strong>Avantages sur version basique:</strong></p>
+<ul>
+<li>✅ Détecte visages jusqu’à 40px (vs 100px)</li>
+<li>✅ Moins de faux positifs</li>
+<li>✅ Pas de flickering</li>
+<li>✅ Plus robuste aux variations</li>
+</ul>
+<p><strong>Inconvénients:</strong></p>
+<ul>
+<li>⚠️ Plus lent (~30-50% selon nb visages)</li>
+<li>⚠️ Plus complexe</li>
+</ul>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> mouth_open_detector_improved.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Contrôles:</strong></p>
+<ul>
+<li><code>+</code> / <code>-</code> : Ajuster seuil MAR</li>
+<li><code>s</code> : Afficher stats détaillées</li>
+<li><code>r</code> : Réinitialiser historique</li>
+<li><code>q</code> : Quitter</li>
+</ul>
+<hr>
+</section>
+<section id="test_setup.py-test" class="level4">
+<h4 class="anchored" data-anchor-id="test_setup.py-test">5. <strong><code>test_setup.py</code></strong> 🧪 TEST</h4>
+<p><strong>Rôle:</strong> Script de diagnostic pour vérifier l’installation</p>
+<p><strong>Ce qu’il fait:</strong></p>
+<ul>
+<li>✓ Teste si OpenCV est installé</li>
+<li>✓ Teste si MediaPipe est installé</li>
+<li>✓ Teste si NumPy est installé</li>
+<li>✓ Teste si PyAudio est installé</li>
+<li>✓ Teste l’accès caméra</li>
+<li>✓ Teste MediaPipe Face Detection</li>
+<li>✓ Affiche les versions installées</li>
+</ul>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> test_setup.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Sortie typique:</strong></p>
+<pre><code>Testing imports...
+  OpenCV: ✓ OK
+  MediaPipe: ✓ OK
+  NumPy: ✓ OK
+  PyAudio: ✗ FAILED
+
+Installed versions:
+  OpenCV: 4.8.1
+  MediaPipe: 0.10.5
+  NumPy: 1.24.3
+
+Testing camera access...
+  Camera: ✓ OK - Resolution: 1280x720
+
+Testing MediaPipe face detection...
+  MediaPipe Face Detection: ✓ OK
+
+✓ All tests passed!</code></pre>
+<hr>
+</section>
+</section>
+<section id="fichiers-de-configuration" class="level3">
+<h3 class="anchored" data-anchor-id="fichiers-de-configuration">📄 <strong>FICHIERS DE CONFIGURATION</strong></h3>
+<section id="requirements_video_analysis.txt-dépendances" class="level4">
+<h4 class="anchored" data-anchor-id="requirements_video_analysis.txt-dépendances">6. <strong><code>requirements_video_analysis.txt</code></strong> 📦 DÉPENDANCES</h4>
+<p><strong>Rôle:</strong> Liste des packages Python nécessaires</p>
+<p><strong>Contenu:</strong></p>
+<pre><code>opencv-python&gt;=4.8.0    # Traitement vidéo
+mediapipe&gt;=0.10.0       # Détection faciale
+numpy&gt;=1.24.0           # Calculs numériques
+
+# Optionnel pour audio:
+# scipy&gt;=1.11.0
+# librosa&gt;=0.10.0</code></pre>
+<p><strong>Installation:</strong></p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-r</span> requirements_video_analysis.txt</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="requirements_video_analysis-copy.txt-doublon" class="level4">
+<h4 class="anchored" data-anchor-id="requirements_video_analysis-copy.txt-doublon">7. <strong><code>requirements_video_analysis copy.txt</code></strong> 🔄 DOUBLON</h4>
+<p><strong>Rôle:</strong> Copie de sauvegarde (probablement ancienne version)</p>
+<p>⚠️ <strong>À supprimer</strong> ou renommer si vous voulez garder un historique</p>
+<hr>
+</section>
+</section>
+<section id="documentation" class="level3">
+<h3 class="anchored" data-anchor-id="documentation">📚 <strong>DOCUMENTATION</strong></h3>
+<section id="readme.md-principal" class="level4">
+<h4 class="anchored" data-anchor-id="readme.md-principal">8. <strong><code>README.md</code></strong> 📖 PRINCIPAL</h4>
+<p><strong>Rôle:</strong> Documentation principale du projet</p>
+<p><strong>Contenu minimal actuel:</strong></p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu"># Cocktail-Party-Multidisciplinary-Project</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>⚠️ <strong>Pourrait être enrichi</strong> avec une vraie documentation du projet</p>
+<hr>
+</section>
+<section id="readme_video.md-guide-vidéo" class="level4">
+<h4 class="anchored" data-anchor-id="readme_video.md-guide-vidéo">9. <strong><code>README_VIDEO.md</code></strong> 📖 GUIDE VIDÉO</h4>
+<p><strong>Rôle:</strong> Guide d’utilisation détaillé pour l’analyse vidéo</p>
+<p><strong>Sections:</strong></p>
+<ul>
+<li>Installation</li>
+<li>Quick Start</li>
+<li>Comment ça fonctionne (explication MAR)</li>
+<li>Exemples de code</li>
+<li>Configuration</li>
+<li>Troubleshooting</li>
+<li>Intégration avec diart</li>
+<li>Prochaines étapes</li>
+</ul>
+<p><strong>Très complet !</strong> Contient tout ce qu’il faut pour démarrer.</p>
+<hr>
+</section>
+<section id="video_analysis_guide.md-guide-technique-approfondi" class="level4">
+<h4 class="anchored" data-anchor-id="video_analysis_guide.md-guide-technique-approfondi">10. <strong><code>VIDEO_ANALYSIS_GUIDE.md</code></strong> 📖 GUIDE TECHNIQUE APPROFONDI</h4>
+<p><strong>Rôle:</strong> Guide technique détaillé (307 lignes)</p>
+<p><strong>Contenu:</strong></p>
+<ul>
+<li>Architecture des classes</li>
+<li>Explications détaillées de chaque composant</li>
+<li>Cas d’usage avancés</li>
+<li>Personnalisation</li>
+<li>Performance</li>
+</ul>
+<p><strong>Différence avec README_VIDEO.md:</strong></p>
+<ul>
+<li>README_VIDEO = Guide utilisateur</li>
+<li>VIDEO_ANALYSIS_GUIDE = Documentation technique</li>
+</ul>
+<hr>
+</section>
+<section id="mouth_detection_guide.md-guide-détection-bouche" class="level4">
+<h4 class="anchored" data-anchor-id="mouth_detection_guide.md-guide-détection-bouche">11. <strong><code>MOUTH_DETECTION_GUIDE.md</code></strong> 👄 GUIDE DÉTECTION BOUCHE</h4>
+<p><strong>Rôle:</strong> Guide complet sur la détection d’ouverture de bouche</p>
+<p><strong>Sections:</strong></p>
+<ul>
+<li>Comparaison des 2 versions (basique vs améliorée)</li>
+<li>Explication technique du MAR</li>
+<li>Distances de détection</li>
+<li>Modules utilisés</li>
+<li>Cas d’usage</li>
+<li>Paramètres à ajuster</li>
+<li>Tests de performance</li>
+<li>Problèmes courants</li>
+<li>Optimisations possibles</li>
+</ul>
+<p><strong>Très utile pour comprendre les limites et optimisations !</strong></p>
+<hr>
+</section>
+</section>
+<section id="fichiers-média" class="level3">
+<h3 class="anchored" data-anchor-id="fichiers-média">🎥 <strong>FICHIERS MÉDIA</strong></h3>
+<section id="videoplayback.mp4-vidéo-test" class="level4">
+<h4 class="anchored" data-anchor-id="videoplayback.mp4-vidéo-test">12. <strong><code>videoplayback.mp4</code></strong> 🎬 VIDÉO TEST</h4>
+<p><strong>Rôle:</strong> Fichier vidéo pour tester les scripts</p>
+<p><strong>Utilisation:</strong></p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>analyzer <span class="op">=</span> VideoAnalyzer(video_source<span class="op">=</span><span class="st">"videoplayback.mp4"</span>)</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>analyzer.run()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="discussion.wav-audio" class="level4">
+<h4 class="anchored" data-anchor-id="discussion.wav-audio">13. <strong><code>discussion.wav</code></strong> 🔊 AUDIO</h4>
+<p><strong>Rôle:</strong> Fichier audio (probablement pour diarisation avec diart)</p>
+<p><strong>Format:</strong> WAV (format non compressé)</p>
+<p><strong>Utilisation potentielle:</strong></p>
+<ul>
+<li>Diarisation audio avec diart</li>
+<li>Tests de synchronisation audio-vidéo</li>
+</ul>
+<hr>
+</section>
+<section id="discussion.rttm-annotations-audio" class="level4">
+<h4 class="anchored" data-anchor-id="discussion.rttm-annotations-audio">14. <strong><code>discussion.rttm</code></strong> 📝 ANNOTATIONS AUDIO</h4>
+<p><strong>Rôle:</strong> Fichier RTTM (Rich Transcription Time Marked)</p>
+<p><strong>Format:</strong> Annotations temporelles de qui parle quand</p>
+<p><strong>Exemple de contenu:</strong></p>
+<pre><code>SPEAKER discussion 1 0.00 2.50 &lt;NA&gt; &lt;NA&gt; speaker1 &lt;NA&gt; &lt;NA&gt;
+SPEAKER discussion 1 2.50 1.30 &lt;NA&gt; &lt;NA&gt; speaker2 &lt;NA&gt; &lt;NA&gt;</code></pre>
+<p><strong>Usage:</strong></p>
+<ul>
+<li>Ground truth pour évaluer la diarisation</li>
+<li>Format standard pour la diarisation speaker</li>
+<li>Compatible avec diart</li>
+</ul>
+<hr>
+</section>
+<section id="ign-uk-podcast-236-british-laughs-and-global-leaks.mp3-podcast" class="level4">
+<h4 class="anchored" data-anchor-id="ign-uk-podcast-236-british-laughs-and-global-leaks.mp3-podcast">15. <strong><code>IGN UK Podcast #236 British Laughs and Global Leaks.mp3</code></strong> 🎙️ PODCAST</h4>
+<p><strong>Rôle:</strong> Fichier audio podcast (test avec plusieurs speakers)</p>
+<p><strong>Utilisation potentielle:</strong></p>
+<ul>
+<li>Tester diarisation audio multi-speakers</li>
+<li>Cas d’usage complexe (chevauchements, rires, etc.)</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="fichiers-dupliqués" class="level3">
+<h3 class="anchored" data-anchor-id="fichiers-dupliqués">🔄 <strong>FICHIERS DUPLIQUÉS</strong></h3>
+<section id="simple_video_demo-copy.py" class="level4">
+<h4 class="anchored" data-anchor-id="simple_video_demo-copy.py">16. <strong><code>simple_video_demo copy.py</code></strong> 🔄</h4>
+</section>
+<section id="video_analysis_template-copy.py" class="level4">
+<h4 class="anchored" data-anchor-id="video_analysis_template-copy.py">17. <strong><code>video_analysis_template copy.py</code></strong> 🔄</h4>
+<p><strong>Rôle:</strong> Copies de sauvegarde / anciennes versions</p>
+<p>⚠️ <strong>Recommandation:</strong></p>
+<ul>
+<li>Vérifier les différences avec les originaux</li>
+<li>Supprimer si identiques</li>
+<li>Ou renommer en <code>.backup</code> ou déplacer dans un dossier <code>archive/</code></li>
+</ul>
+<hr>
+</section>
+</section>
+</section>
+<section id="flux-de-travail-typique" class="level2">
+<h2 class="anchored" data-anchor-id="flux-de-travail-typique">🔄 Flux de travail typique</h2>
+<section id="cas-1-démarrage-rapide" class="level3">
+<h3 class="anchored" data-anchor-id="cas-1-démarrage-rapide"><strong>Cas 1: Démarrage rapide</strong></h3>
+<div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Tester l'installation</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> test_setup.py</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Test rapide webcam</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> simple_video_demo.py</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Si ça marche, utiliser le template complet</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> video_analysis_template.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="cas-2-détection-bouche-uniquement" class="level3">
+<h3 class="anchored" data-anchor-id="cas-2-détection-bouche-uniquement"><strong>Cas 2: Détection bouche uniquement</strong></h3>
+<div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Version basique (visages proches)</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> mouth_open_detector.py</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Version améliorée (visages éloignés)</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> mouth_open_detector_improved.py</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="cas-3-analyse-vidéo-complète" class="level3">
+<h3 class="anchored" data-anchor-id="cas-3-analyse-vidéo-complète"><strong>Cas 3: Analyse vidéo complète</strong></h3>
+<div class="sourceCode" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> video_analysis_template <span class="im">import</span> VideoAnalyzer</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Analyser une vidéo</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>analyzer <span class="op">=</span> VideoAnalyzer(video_source<span class="op">=</span><span class="st">"videoplayback.mp4"</span>)</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>analyzer.run(display<span class="op">=</span><span class="va">True</span>, output_path<span class="op">=</span><span class="st">"analyzed_output.mp4"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+</section>
+<section id="comparaison-des-scripts-principaux" class="level2">
+<h2 class="anchored" data-anchor-id="comparaison-des-scripts-principaux">📊 Comparaison des scripts principaux</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 16%">
+<col style="width: 16%">
+<col style="width: 18%">
+<col style="width: 15%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Fichier</th>
+<th>Usage</th>
+<th>Visages éloignés</th>
+<th>Performance</th>
+<th>Complexité</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>simple_video_demo.py</code></td>
+<td>Prototype rapide</td>
+<td>❌</td>
+<td>⚡⚡⚡ Très rapide</td>
+<td>⭐ Simple</td>
+</tr>
+<tr class="even">
+<td><code>video_analysis_template.py</code></td>
+<td>Production</td>
+<td>⚠️ Limité</td>
+<td>⚡⚡ Rapide</td>
+<td>⭐⭐ Moyen</td>
+</tr>
+<tr class="odd">
+<td><code>mouth_open_detector.py</code></td>
+<td>Test bouche</td>
+<td>❌</td>
+<td>⚡⚡⚡ Très rapide</td>
+<td>⭐ Simple</td>
+</tr>
+<tr class="even">
+<td><code>mouth_open_detector_improved.py</code></td>
+<td>Bouche précise</td>
+<td>✅</td>
+<td>⚡ Moyen</td>
+<td>⭐⭐⭐ Complexe</td>
+</tr>
+</tbody>
+</table>
+<hr>
+</section>
+<section id="quelle-version-choisir" class="level2">
+<h2 class="anchored" data-anchor-id="quelle-version-choisir">🎯 Quelle version choisir ?</h2>
+<section id="pour-débuter-tests-rapides" class="level3">
+<h3 class="anchored" data-anchor-id="pour-débuter-tests-rapides"><strong>Pour débuter / tests rapides:</strong></h3>
+<p>→ <code>simple_video_demo.py</code></p>
+</section>
+<section id="pour-une-application-complète" class="level3">
+<h3 class="anchored" data-anchor-id="pour-une-application-complète"><strong>Pour une application complète:</strong></h3>
+<p>→ <code>video_analysis_template.py</code></p>
+</section>
+<section id="pour-détecter-bouche-ouverte-visages-proches" class="level3">
+<h3 class="anchored" data-anchor-id="pour-détecter-bouche-ouverte-visages-proches"><strong>Pour détecter bouche ouverte (visages proches):</strong></h3>
+<p>→ <code>mouth_open_detector.py</code></p>
+</section>
+<section id="pour-détecter-bouche-ouverte-visages-éloignésmultiples-distances" class="level3">
+<h3 class="anchored" data-anchor-id="pour-détecter-bouche-ouverte-visages-éloignésmultiples-distances"><strong>Pour détecter bouche ouverte (visages éloignés/multiples distances):</strong></h3>
+<p>→ <code>mouth_open_detector_improved.py</code></p>
+</section>
+<section id="pour-diagnostiquer-un-problème-dinstallation" class="level3">
+<h3 class="anchored" data-anchor-id="pour-diagnostiquer-un-problème-dinstallation"><strong>Pour diagnostiquer un problème d’installation:</strong></h3>
+<p>→ <code>test_setup.py</code></p>
+<hr>
+</section>
+</section>
+<section id="intégration-avec-diart" class="level2">
+<h2 class="anchored" data-anchor-id="intégration-avec-diart">🔗 Intégration avec diart</h2>
+<p>Le dossier parent contient <code>diart/</code> qui fait la <strong>diarisation audio</strong>.</p>
+<p><strong>Possibilité de combiner:</strong></p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Vidéo: Qui ouvre la bouche ?</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>video_faces <span class="op">=</span> video_analyzer.process_frame(frame)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Audio: Qui produit du son ?</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>audio_speakers <span class="op">=</span> diart_pipeline.process_audio(audio)</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Fusion: Qui parle vraiment ?</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a><span class="co"># → Bouche ouverte ET son présent = Parole confirmée</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Avantage:</strong></p>
+<ul>
+<li>Réduction faux positifs (bouche ouverte sans parler)</li>
+<li>Meilleure attribution speaker</li>
+<li>Analyse multimodale robuste</li>
+</ul>
+<hr>
+</section>
+<section id="évolution-du-projet" class="level2">
+<h2 class="anchored" data-anchor-id="évolution-du-projet">📈 Évolution du projet</h2>
+<p><strong>Chronologie probable:</strong></p>
+<ol type="1">
+<li>✅ Base: <code>video_analysis_template.py</code> + <code>simple_video_demo.py</code></li>
+<li>✅ Test: <code>test_setup.py</code></li>
+<li>✅ Documentation: README files + guides</li>
+<li>✅ Nouveau: <code>mouth_open_detector.py</code> (version basique)</li>
+<li>✅ <strong>Aujourd’hui</strong>: <code>mouth_open_detector_improved.py</code> (version optimisée)</li>
+</ol>
+<p><strong>Prochaines étapes possibles:</strong></p>
+<ul>
+<li>🔄 Fusion audio-vidéo avec diart</li>
+<li>👤 Face recognition pour identifier les personnes</li>
+<li>🎭 Détection d’émotions</li>
+<li>👁️ Gaze detection (où regarde la personne)</li>
+<li>🎯 Tracking des visages entre frames</li>
+<li>📊 Dashboard de statistiques</li>
+</ul>
+<hr>
+</section>
+<section id="nettoyage-recommandé" class="level2">
+<h2 class="anchored" data-anchor-id="nettoyage-recommandé">🧹 Nettoyage recommandé</h2>
+<div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Supprimer les doublons si identiques</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="fu">rm</span> <span class="st">"simple_video_demo copy.py"</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a><span class="fu">rm</span> <span class="st">"video_analysis_template copy.py"</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="fu">rm</span> <span class="st">"requirements_video_analysis copy.txt"</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Ou les archiver</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> archive</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a><span class="fu">mv</span> <span class="pp">*</span><span class="dt">\ </span>copy.<span class="pp">*</span> archive/</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<hr>
+</section>
+<section id="fichiers-essentiels-vs-optionnels" class="level2">
+<h2 class="anchored" data-anchor-id="fichiers-essentiels-vs-optionnels">📦 Fichiers essentiels vs optionnels</h2>
+<section id="essentiels-ne-pas-supprimer" class="level3">
+<h3 class="anchored" data-anchor-id="essentiels-ne-pas-supprimer"><strong>ESSENTIELS (ne pas supprimer):</strong></h3>
+<ul>
+<li>✅ <code>video_analysis_template.py</code></li>
+<li>✅ <code>simple_video_demo.py</code></li>
+<li>✅ <code>mouth_open_detector_improved.py</code></li>
+<li>✅ <code>requirements_video_analysis.txt</code></li>
+<li>✅ <code>README_VIDEO.md</code></li>
+<li>✅ <code>MOUTH_DETECTION_GUIDE.md</code></li>
+</ul>
+</section>
+<section id="utiles" class="level3">
+<h3 class="anchored" data-anchor-id="utiles"><strong>UTILES:</strong></h3>
+<ul>
+<li>✅ <code>test_setup.py</code></li>
+<li>✅ <code>mouth_open_detector.py</code></li>
+<li>✅ <code>VIDEO_ANALYSIS_GUIDE.md</code></li>
+</ul>
+</section>
+<section id="optionnelsdoublons" class="level3">
+<h3 class="anchored" data-anchor-id="optionnelsdoublons"><strong>OPTIONNELS/DOUBLONS:</strong></h3>
+<ul>
+<li>⚠️ <code>*copy.*</code> (copies de sauvegarde)</li>
+<li>⚠️ Fichiers média (peuvent être remplacés)</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="ressources-dapprentissage" class="level2">
+<h2 class="anchored" data-anchor-id="ressources-dapprentissage">🎓 Ressources d’apprentissage</h2>
+<p><strong>Pour comprendre MediaPipe:</strong></p>
+<ul>
+<li>Face Detection: https://google.github.io/mediapipe/solutions/face_detection</li>
+<li>Face Mesh: https://google.github.io/mediapipe/solutions/face_mesh</li>
+<li>468 landmarks: https://github.com/google/mediapipe/blob/master/docs/solutions/face_mesh.md</li>
+</ul>
+<p><strong>Pour comprendre le MAR:</strong></p>
+<ul>
+<li>Basé sur EAR (Eye Aspect Ratio) pour clignements</li>
+<li>Paper: “Real-Time Eye Blink Detection using Facial Landmarks”</li>
+<li>Adapté pour la bouche</li>
+</ul>
+<p><strong>Pour OpenCV:</strong></p>
+<ul>
+<li>Tutoriels Python: https://docs.opencv.org/master/d6/d00/tutorial_py_root.html</li>
+<li>VideoCapture: https://docs.opencv.org/master/d8/dfe/classcv_1_1VideoCapture.html</li>
+</ul>
+<hr>
+</section>
+<section id="tips" class="level2">
+<h2 class="anchored" data-anchor-id="tips">💡 Tips</h2>
+<section id="performance" class="level3">
+<h3 class="anchored" data-anchor-id="performance"><strong>Performance:</strong></h3>
+<div class="sourceCode" id="cb20"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Traiter en résolution réduite</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>frame <span class="op">=</span> cv2.resize(frame, (<span class="dv">640</span>, <span class="dv">480</span>))</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Skip frames</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> frame_count <span class="op">%</span> <span class="dv">2</span> <span class="op">==</span> <span class="dv">0</span>:</span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>    process_frame(frame)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="debugging" class="level3">
+<h3 class="anchored" data-anchor-id="debugging"><strong>Debugging:</strong></h3>
+<div class="sourceCode" id="cb21"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Afficher les landmarks</span></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>draw_landmarks <span class="op">=</span> <span class="va">True</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Afficher stats détaillées</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>show_stats <span class="op">=</span> <span class="va">True</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Sauvegarder frames problématiques</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> problematic_detection:</span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>    cv2.imwrite(<span class="ss">f"debug_frame_</span><span class="sc">{</span>frame_count<span class="sc">}</span><span class="ss">.jpg"</span>, frame)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="production" class="level3">
+<h3 class="anchored" data-anchor-id="production"><strong>Production:</strong></h3>
+<div class="sourceCode" id="cb22"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Désactiver affichage pour performance</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>analyzer.run(display<span class="op">=</span><span class="va">False</span>, output_path<span class="op">=</span><span class="st">"output.mp4"</span>)</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Limiter le nombre de visages</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>max_num_faces<span class="op">=</span><span class="dv">3</span>  <span class="co"># Au lieu de 10</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Utiliser GPU si disponible (MediaPipe)</span></span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Certaines versions supportent GPU automatiquement</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

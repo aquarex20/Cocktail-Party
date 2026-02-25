@@ -1,144 +1,167 @@
-# CocktailPartyAI
+# CocktailPartyAI — Local Voice Agent (with diarization refinement)
 
-A real-time voice assistant system for conversational AI interactions, featuring advanced Voice Activity Detection (VAD), speech-to-text transcription, and text-to-speech synthesis.
+Real-time voice chat using local models (STT → LLM → TTS) plus an optional **diarization server** that assigns speaker labels (e.g. `SPK_00`, `SPK_01`) and runs a background **refinement loop** to improve speaker assignments over time.
 
-## 🎯 Overview
+## Capabilities
 
-CocktailPartyAI enables real-time voice conversations with AI models. The system listens to your microphone, transcribes speech, sends it to an AI API, and speaks the response back to you—all in real-time with intelligent voice activity detection.
+- **Real-time voice chat UI**: WebRTC audio in/out with a Gradio web UI (`voice_chat.py`)
+- **Multiple languages (UI-selectable)**: currently supports **English** and **Italian** selection in the UI, used to guide STT (WhisperX) and TTS (Kokoro)
+- **Multiple TTS voices (UI-selectable)**: choose from multiple **Kokoro voices**, with voice options depending on the selected language
+- **Local LLM**: runs via Ollama (default: `gemma3:4b`)
+- **Speech-to-text (STT)**: WhisperX-based transcription in `whisper_stt.py`
+- **Text-to-speech (TTS)**: Kokoro streaming output
+- **Optional diarization server**: FastAPI server (`diarization_server.py`) that
+  - diarizes each utterance and assigns speakers to words when transcript segments are provided
+  - keeps a rolling audio buffer per session
+  - periodically **re-runs diarization over recent audio** and updates stored utterances with `assigned_refined`
 
-## ⭐ Main Component: `ai_tts.py`
+## Prerequisites
 
-**`Cocktail-Party/Audio_Analysis/ai_tts.py`** is the core working application—a fully functional real-time voice assistant with a graphical interface.
+- Python **3.11+**
+- [uv](https://github.com/astral-sh/uv) for dependency management
+- [Ollama](https://ollama.ai/) for running the local LLM
+- Optional: an NVIDIA GPU (CUDA) if you want GPU acceleration for diarization / WhisperX
 
-### Features
+## Installation
 
-- **🎤 Voice Activity Detection (VAD)**: Automatically detects when you're speaking using WebRTC VAD with automatic calibration
-- **📝 Speech-to-Text**: Transcribes your speech using Faster Whisper (offline, fast, accurate)
-- **🤖 AI Integration**: Connects to local AI models via Ollama API for conversational responses
-- **🔊 Text-to-Speech**: Speaks AI responses using Coqui TTS
-- **🎛️ Calibration System**: Automatically calibrates VAD thresholds based on your environment (ambient noise, speech levels)
-- **🎙️ Push-to-Talk Mode**: Alternative recording mode for manual control
-- **📊 Real-time VU Meter**: Visual feedback of microphone input levels
-- **⚙️ Adjustable VAD Aggressiveness**: Fine-tune voice detection sensitivity
+From `Cocktail-Party/local-voice-ai-agent/`:
 
-### How It Works
-
-1. **Calibration**: The system measures ambient noise and your speech levels to optimize detection thresholds
-2. **Listening**: VAD continuously monitors audio input and detects when you start speaking
-3. **Transcription**: Detected speech is transcribed using Whisper
-4. **AI Processing**: Transcripts are sent to your local AI model (Ollama) with conversation context
-5. **Response**: AI responses are synthesized to speech and played back
-
-## 📋 Prerequisites
-
-- Python 3.8 or higher
-- A microphone
-- [Ollama](https://ollama.ai/) installed and running locally (for AI responses)
-- An Ollama model downloaded (default: `llama3.2:latest`)
-
-## 🚀 Installation
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone <your-repo-url>
-   cd CocktailPartyAI
-   ```
-
-2. **Navigate to the Audio Analysis directory:**
-
-   ```bash
-   cd Cocktail-Party/Audio_Analysis
-   ```
-
-3. **Install dependencies:**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   The `requirements.txt` includes all necessary packages:
-
-   - `numpy` - Numerical operations
-   - `scipy` - Signal processing (resampling)
-   - `requests` & `httpx` - HTTP client for AI API
-   - `sounddevice` - Audio I/O
-   - `webrtcvad` - Voice Activity Detection
-   - `TTS` - Coqui Text-to-Speech
-   - `faster-whisper` - Fast Whisper speech recognition
-
-4. **Set up Ollama (if not already installed):**
-   ```bash
-   # Install Ollama from https://ollama.ai/
-   # Pull a model (e.g., llama3.2:latest)
-   ollama pull llama3.2:latest
-   ```
-
-## 🎮 Usage
-
-1. **Start Ollama (if not running):**
-
-   ```bash
-   ollama serve
-   ```
-
-2. **Run the application:**
-
-   ```bash
-   python ai_tts.py
-   ```
-
-3. **Using the GUI:**
-   - **Select Microphone**: Choose your input device from the dropdown
-   - **🧭 Calibrate**: Click to calibrate VAD (stay quiet for 1.5s, then speak clearly for 2s)
-   - **🎤 Start Listening (VAD)**: Begin automatic voice detection mode
-   - **⛔ Stop Listening**: Stop the VAD system
-   - **🎙 Push-to-Talk (hold)**: Hold the button to record manually
-   - **🔊 Speak Text**: Send the text in the input area to AI and speak the response
-   - **🧹 Clear**: Clear the transcript text area
-
-## ⚙️ Configuration
-
-You can modify settings in `ai_tts.py`:
-
-- **AI Model**: Change `AI_MODEL` (line 51) to use a different Ollama model
-- **AI API URL**: Modify `AI_API_URL` (line 50) if Ollama runs on a different port
-- **STT Model**: Adjust `STT_MODEL` (line 43) - options: `"small.en"`, `"medium.en"`, `"large-v3"`
-- **TTS Model**: Change `TTS_MODEL` (line 39) for different voice synthesis
-- **Initial Prompt**: Customize `INITIAL_PROMPT` (lines 52-59) to change AI behavior
-
-## 📁 Project Structure
-
-```
-CocktailPartyAI/
-├── Cocktail-Party/
-│   ├── Audio_Analysis/          ⭐ Main working component
-│   │   ├── ai_tts.py            ← Core voice assistant application
-│   │   └── requirements.txt     ← Dependencies
-│   ├── Video_Analysis/          (Experimental video analysis components)
-│   └── ...                      (Other audio/video utilities)
-└── diart/                       (Speaker diarization library)
+```bash
+brew install uv ollama
+uv venv
+source .venv/bin/activate
+uv sync
 ```
 
-## 🔧 Troubleshooting
+This folder expects the Kokoro weights to be present:
+- `kokoro-v1.0.onnx`
+- `voices-v1.0.bin`
 
-- **"Cannot connect to AI API"**: Make sure Ollama is running (`ollama serve`)
-- **No microphone detected**: Check your system audio settings and ensure the mic is not being used by another application
-- **Poor VAD detection**: Run calibration again in a quieter environment
-- **Slow transcription**: Try using `"small.en"` instead of `"medium.en"` for faster (but less accurate) transcription
-- **TTS model download**: The first run will download the TTS model (~100MB), which may take a few minutes
+Download the LLM in Ollama:
 
-## 📝 Notes
+```bash
+ollama pull gemma3:4b
+```
 
-- The application uses **offline processing** for STT (no internet required for transcription)
-- AI responses require Ollama to be running locally
-- Calibration significantly improves VAD accuracy—always calibrate in your actual usage environment
-- The system maintains conversation context by keeping the last few exchanges in memory
+## Configuration
 
-## 🎯 Other Components
+Create a local `.env` (do not commit it):
 
-The repository also contains experimental video analysis tools in `Video_Analysis/` and the `diart` speaker diarization library, but **`ai_tts.py` is the main production-ready component**.
+```bash
+cp .env.example .env
+```
 
----
+- **Hugging Face token (required for diarization)**: WhisperX diarization uses pyannote models hosted on Hugging Face; you must set `HUGGING_FACE_TOKEN` (or `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN`) in `.env` for diarization to work.
+- **CPU/GPU tuning**:
+  - `DIARIZATION_DEVICE=auto|cpu|cuda`
+  - `WHISPERX_DEVICE=auto|cpu|cuda|mps`
+  - `WHISPERX_COMPUTE_TYPE=int8|float16|float32`
+  - `WHISPERX_MODEL=small|medium|...`
 
-**Enjoy your real-time AI conversations! 🎉**
+## Running
+
+### 1) Start the diarization server (optional but recommended)
+
+```bash
+source .venv/bin/activate
+uvicorn diarization_server:app --host 127.0.0.1 --port 8001
+```
+
+Notes:
+- If the Hugging Face token is missing, diarization requests will fail and the server will store an error for the affected utterances.
+- The refinement loop runs automatically on server startup (see env vars below).
+
+### 2) Start the voice chat UI
+
+```bash
+source .venv/bin/activate
+python voice_chat.py
+```
+
+The UI posts utterances to the diarization server via `DIARIZATION_SERVER_URL` (defaults to `http://127.0.0.1:8001`).
+
+## How it works (high level)
+
+1. The browser streams audio via WebRTC.
+2. `ReplyOnPause` detects an end-of-turn pause and triggers `response(...)`.
+3. `whisper_stt.py` transcribes the accumulated audio (WhisperX).
+4. The transcript is sent to the local LLM via Ollama.
+5. The answer is streamed back as audio using Kokoro TTS.
+6. In parallel, `voice_chat.py` sends audio + transcript segments to `diarization_server.py` (fire-and-forget).
+7. The server stores `assigned` speaker labels for the utterance, then periodically refines recent history and updates `assigned_refined`.
+
+## Diarization refinement loop (server)
+
+`diarization_server.py` keeps a rolling audio buffer per session and runs a background thread that:
+- re-diarizes the most recent window of audio
+- remaps speakers to stable “global” speaker IDs
+- re-assigns word speakers for stored utterances that overlap the refine window (`assigned_refined`)
+
+Environment variables:
+- `DIARIZATION_REFINE_INTERVAL_S` (default `10`): how often refinement runs
+- `DIARIZATION_REFINE_MIN_S` (default `30`): minimum buffered audio required before refining
+- `DIARIZATION_REFINE_MAX_S` (default `120`): rolling window size for refinement
+- `DIARIZATION_STORE_MAX_S` (default `300`): how much audio to keep per session
+
+## Machine-dependent performance tuning (CPU vs GPU)
+
+Some defaults are chosen for broad compatibility (often CPU-friendly). Depending on your machine, you may want to tune:
+
+- **WhisperX STT** (`whisper_stt.py`):
+  - `WHISPERX_MODEL` (bigger = better accuracy, slower)
+  - `WHISPERX_DEVICE` and `WHISPERX_COMPUTE_TYPE` (e.g. `cuda + float16` for GPUs, `cpu + int8` for CPUs)
+  - `WHISPER_MIN_AUDIO_S` to control how short utterances are ignored
+- **Diarization server** (`diarization_server.py`):
+  - `DIARIZATION_DEVICE` to force CPU or GPU
+  - refinement window settings (`DIARIZATION_REFINE_*`) to trade latency/compute for higher-quality speaker assignments
+
+## Legacy / experimental scripts
+
+- `voice_chat_legacy.py`: older UI version kept for reference.
+- `old_stuff/`: older prototypes and experiments (not kept in sync with the current entrypoints).
+
+## Next steps (future improvements): adaptive pause detection / turn-taking
+
+Right now, the “when should the AI answer?” behavior is mainly controlled by **pause detection**: `FastRTC`’s `ReplyOnPause` accumulates audio and triggers your reply callback when it decides the user has paused/stopped speaking.
+
+In real cocktail-party settings (noise, cross-talk, interruptions, fast back-and-forth), a single fixed configuration is rarely optimal. A strong next step is to **tune these parameters dynamically during a conversation** based on:
+- background noise level / mic gain
+- whether multiple speakers are talking over each other
+- interaction style (“quick banter” vs “thoughtful long answers”)
+- how often the user gets “cut off” vs how often the AI feels sluggish to respond
+
+Below are the two configuration classes (as defined in `fastrtc`) that govern this behavior.
+
+### `AlgoOptions` (pause-detection algorithm settings)
+
+Defined in `fastrtc/reply_on_pause.py`.
+
+- **`audio_chunk_duration` (float, seconds)**: how much audio must accumulate before the VAD check is run on that buffer. Larger values generally mean the system **waits longer** before concluding “pause detected”, at the cost of latency.
+- **`started_talking_threshold` (float, seconds)**: if the VAD estimates more than this much speech inside the current chunk, the user is considered to have **started talking** (helps avoid triggering on tiny noises).
+- **`speech_threshold` (float, seconds)**: after “started talking” is true, if the VAD estimates *less* speech than this inside the chunk, it is treated as **stopped speaking / pause detected** (smaller values usually make it less eager to stop).
+- **`max_continuous_speech_s` (float, seconds)**: a safety cap; if continuous speech reaches this duration, the handler triggers even if a pause is not detected (useful to prevent never-ending utterances).
+
+### `SileroVadOptions` (Silero VAD model settings)
+
+Defined in `fastrtc/pause_detection/silero.py`. These settings affect how raw audio is labeled as speech vs silence.
+
+- **`threshold` (float)**: Silero outputs a speech probability per window; probabilities **above** this are treated as speech. Higher = stricter (can miss quiet speech); lower = more sensitive (can treat noise as speech).
+- **`min_speech_duration_ms` (int, ms)**: detected speech segments shorter than this are discarded (filters out clicks / tiny bursts).
+- **`max_speech_duration_s` (float, seconds)**: splits very long speech segments (primarily relevant for segmenting long recordings).
+- **`min_silence_duration_ms` (int, ms)**: how long silence must persist at the end of a segment before the segment is closed (helps handle hesitation/short pauses).
+- **`window_size_samples` (int, samples @ 16kHz)**: VAD analysis window size. Silero is typically trained for `512`, `1024`, or `1536` at 16kHz; other values can hurt performance.
+- **`speech_pad_ms` (int, ms)**: padding added around detected speech segments to reduce overly-tight cuts.
+
+### Where these are applied
+
+`ReplyOnPause` accepts both as parameters:
+
+```python
+ReplyOnPause(
+    fn=your_reply_fn,
+    algo_options=AlgoOptions(...),
+    model_options=SileroVadOptions(...),
+)
+```
+
+In this repo, `voice_chat.py` constructs `ReplyOnPause(response, algo_options=..., model_options=...)` so you can tune it per environment.

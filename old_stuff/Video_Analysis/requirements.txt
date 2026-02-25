@@ -1,0 +1,14 @@
+numpy
+scipy
+requests
+httpx
+sounddevice
+webrtcvad
+openai-whisper
+pyaudio
+pyttsx3
+gtts
+pygame
+SpeechRecognition
+opencv-python
+mediapipe

@@ -1,0 +1,36 @@
+# Requirements for Video Analysis Template
+
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+
+# Optional: For advanced face recognition (video_analysis_with_face_recognition.py)
+# Note: face-recognition requires dlib which may need compilation
+# The script will work with basic features if this is not installed
+face-recognition>=1.3.0
+
+# Optional: For screen sharing/capture
+mss>=9.0.0
+
+# Optional: For advanced audio analysis
+# scipy>=1.11.0
+# librosa>=0.10.0
+
+# Required for multi-threaded video+audio (video_audio_threaded.py)
+pyaudio>=0.2.14
+
+# For speech-to-text transcription
+# Option 1: Google Speech Recognition (requires internet)
+SpeechRecognition>=3.10.0
+
+# Option 2: OpenAI Whisper (offline, better accuracy but slower)
+# openai-whisper>=20231117
+
+# For text-to-speech (reading transcripts)
+# Option 1: pyttsx3 (offline, works without internet)
+pyttsx3>=2.90
+
+# Option 2: gTTS (online, better quality, requires internet)
+# gtts>=2.4.0
+# pygame>=2.5.0
+

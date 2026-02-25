@@ -86,3 +86,19 @@ lib/
 lib64
 .idea
 .venv
+
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.gradio/
+
+# Virtual environments
+.venv
+
+Readme_files/
+Readme.html

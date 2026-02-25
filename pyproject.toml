@@ -1,0 +1,32 @@
+[project]
+name = "local-voice-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastrtc[stt,tts,vad]==0.0.34",
+    "av>=16.1.0",
+    "kokoro-onnx>=0.4.7",
+    "loguru>=0.7.3",
+    "ollama>=0.4.7",
+    "gradio==5.50.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24.0",
+    "python-dotenv>=1.2.1",
+    "twilio>=9.10.2",
+    "faster-whisper>=1.2.1",
+    "utils>=1.0.2",
+    "accelerate>=1.12.0",
+    "gradio-webrtc>=0.0.31",
+    "azure-cognitiveservices-speech>=1.48.2",
+    "whisperx>=3.8.1",
+]
+
+[project.optional-dependencies]
+# Italian STT (Whisper) for transcribing Italian speech when Language is set to Italian
+italian-stt = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "transformers>=4.30.0",
+]
