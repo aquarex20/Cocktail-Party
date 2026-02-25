@@ -5,6 +5,8 @@ Real-time voice chat using local models (STT → LLM → TTS) plus an optional *
 ## Capabilities
 
 - **Real-time voice chat UI**: WebRTC audio in/out with a Gradio web UI (`voice_chat.py`)
+- **Multiple languages (UI-selectable)**: currently supports **English** and **Italian** selection in the UI, used to guide STT (WhisperX) and TTS (Kokoro)
+- **Multiple TTS voices (UI-selectable)**: choose from multiple **Kokoro voices**, with voice options depending on the selected language
 - **Local LLM**: runs via Ollama (default: `gemma3:4b`)
 - **Speech-to-text (STT)**: WhisperX-based transcription in `whisper_stt.py`
 - **Text-to-speech (TTS)**: Kokoro streaming output
