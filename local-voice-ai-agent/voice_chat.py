@@ -142,28 +142,6 @@ def enqueue_diarization(
             pass
 
     threading.Thread(target=_post, daemon=True).start()
-def render_chat(msgs):
-    print(f"Rendering chat: {msgs}")
-    out = ["<div style='display:flex;flex-direction:column;gap:8px;'>"]
-    for m in msgs:
-        role = m["role"]
-        txt = html.escape(m["content"])
-        if role == "user":
-            out.append(
-                "<div style='align-self:flex-end;max-width:75%;"
-                "background:#2b2b2b;color:#fff;padding:10px 12px;"
-                "border-radius:16px 16px 4px 16px;'>"
-                f"{txt}</div>"
-            )
-        else:
-            out.append(
-                "<div style='align-self:flex-start;max-width:75%;"
-                "background:#f2f2f2;color:#111;padding:10px 12px;"
-                "border-radius:16px 16px 16px 4px;'>"
-                f"{txt}</div>"
-            )
-    out.append("</div>")
-    return "\n".join(out)
 
 
 def update_language(lang):
@@ -194,33 +172,6 @@ async def stream_tts(text, voice_value: str, language_value: str):
         # IMPORTANT: return (sample_rate, numpy_array)
         yield (sr, samples.astype(np.float32))
 
-
-def convo_to_transcript(transformers_convo: list[dict]) -> str:
-    lines = []
-    for m in transformers_convo or []:
-        role = m.get("role", "assistant")
-
-        if role == "assistant":
-            lines.append(f"AI: {m.get('content','')}")
-            continue
-
-        if role == "user":
-            runs = m.get("speaker_runs") or []
-            if isinstance(runs, list) and runs:
-                for r in runs:
-                    spk = r.get("speaker") or "unassigned"
-                    txt = r.get("text") or ""
-                    if txt.strip():
-                        lines.append(f"{spk}: {txt}")
-            else:
-                spk = m.get("speaker_label") or "unassigned"
-                lines.append(f"{spk}: {m.get('content','')}")
-            continue
-
-        # fallback for any other roles
-        lines.append(f"{role.upper()}: {m.get('content','')}")
-
-    return "\n".join(lines).strip()
 
 
 def convo_to_messages(transformers_convo: list[dict]) -> list[dict]:
@@ -426,16 +377,6 @@ def render_bubbles(messages):
     out.append("</div>")
     return "\n".join(out)
 
-def ao_handler(*args):
-    # Most common: args[0] is the payload you yielded in AdditionalOutputs(...)
-    payload = args[0]
-
-    # If you yielded AdditionalOutputs(x, y), payload is usually (x, y)
-    if isinstance(payload, (list, tuple)) and len(payload) == 2:
-        return payload[0], payload[1]
-
-    # Fallback: don't break UI
-    return gr.update(), gr.update()
 
 with gr.Blocks(css="""
 .audio-container {
@@ -498,7 +439,6 @@ with gr.Blocks(css="""
             gr.Markdown("<div style='text-align:center'><h2>Chat History</h2></div>")
 
             chat_md = gr.HTML()
-            chat_state = gr.State([])
 
             timer=gr.Timer(2.0)
             def update_html(transformers_convo, diarization_utterances_state):
