@@ -1,4 +1,21 @@
 # ============================================
+# OS / editor noise + local secrets
+# ============================================
+
+# macOS Finder
+.DS_Store
+**/.DS_Store
+
+# Local env (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+.cursor/
+
+# ============================================
 # FICHIERS LOURDS - Médias
 # ============================================
 
@@ -43,6 +60,9 @@
 *.pb
 *.pbtxt
 
+# Kokoro voices weights (large)
+voices-v*.bin
+
 # Modèles ML généraux
 *.h5
 *.hdf5
@@ -85,7 +105,7 @@ eggs/
 lib/
 lib64
 .idea
-.venv
+.venv/
 
 
 # Python-generated files
@@ -98,7 +118,19 @@ wheels/
 .gradio/
 
 # Virtual environments
-.venv
+.venv/
 
-Readme_files/
-Readme.html
+# Caches / test artifacts
+.cache/
+**/.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+README_files/
+README.html
