@@ -221,7 +221,51 @@ def convo_to_transcript(transformers_convo: list[dict]) -> str:
         lines.append(f"{role.upper()}: {m.get('content','')}")
 
     return "\n".join(lines).strip()
-def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers_convo: list[dict],conversation_value: str, language_value: str, voice_value: str): # 
+
+
+def convo_to_messages(transformers_convo: list[dict]) -> list[dict]:
+    """
+    Convert our internal convo objects to a structured chat history for the LLM.
+    This is much more reliable than passing a whole transcript as one "user" message.
+    """
+    msgs: list[dict] = []
+    for m in transformers_convo or []:
+        role = m.get("role")
+        if role == "assistant":
+            txt = (m.get("content") or "").strip()
+            if txt:
+                msgs.append({"role": "assistant", "content": txt})
+            continue
+
+        if role == "user":
+            runs = m.get("speaker_runs") or []
+            if isinstance(runs, list) and runs:
+                parts = []
+                for r in runs:
+                    spk = (r.get("speaker") or "unassigned").strip()
+                    txt = (r.get("text") or "").strip()
+                    if txt:
+                        parts.append(f"{spk}: {txt}")
+                content = "\n".join(parts).strip()
+            else:
+                spk = (m.get("speaker_label") or "unassigned").strip()
+                txt = (m.get("content") or "").strip()
+                content = f"{spk}: {txt}".strip() if txt else ""
+
+            if content:
+                msgs.append({"role": "user", "content": content})
+            continue
+
+    return msgs
+def response(
+    audio: tuple[int, np.ndarray],
+    string_identifier: str,
+    transformers_convo: list[dict],
+    conversation_value: str,
+    language_value: str,
+    voice_value: str,
+    diarization_utterances: dict | None,
+): # 
     sample_rate, audio_array = preprocess_audio(*audio)
     reply_id = secrets.token_urlsafe(12)
 
@@ -237,14 +281,23 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
     # Non-blocking server-side: diarize + align + assign word speakers.
     enqueue_diarization(SESSION_ID, reply_id, audio_array, sample_rate, whisper_segments, lang_code)
 
-    new_convo=transformers_convo+[{"role": "user", "content": transcript, "reply_id": reply_id}]
+    new_convo = transformers_convo + [{"role": "user", "content": transcript, "reply_id": reply_id}]
     conversation_value += "User: " + transcript + "\n"
-
+    # Merge latest diarization annotations (single-writer: `response()` updates `transformers_convo`)
+    new_convo = annotate_user_messages_with_speaker_runs(
+        new_convo, diarization_utterances or {}
+    )
+    # Commit the user turn to state immediately (helps avoid races on interruption).
+    yield (
+        sample_rate,
+        np.zeros((1, int(sample_rate * 0.02)), dtype=np.float32),
+    ), AdditionalOutputs(conversation_value, new_convo)
     # before yielding
 
     #yield AdditionalOutputs(("user", transcript))
 
     logger.debug(f"🎤 Transcript: {transcript}")
+    llm_messages = convo_to_messages(new_convo)
     response = chat(
         model=OLLAMA_MODEL,
         messages=[
@@ -254,20 +307,28 @@ def response(audio: tuple[int, np.ndarray], string_identifier: str, transformers
                     "You are a helpful assistant at a cocktail party.\n"
                     "The conversation transcript you receive may contain speaker labels like SPK_00, SPK_01, etc., and AI.\n"
                     "Those labels are ONLY for context.\n"
+                    "IMPORTANT: Always respond to the MOST RECENT user message.\n"
                     "Respond naturally to the conversation in "
                     + language_value +
                     ".\n"
                     "IMPORTANT: Output ONLY the response text. Do NOT include any speaker labels or prefixes (no 'AI:', no 'User:', no 'SPK_00:')."
                 ),
             },
-            {"role": "user", "content": convo_to_transcript(new_convo) or "User: " + transcript + "\n"},
+            *llm_messages,
         ],
         options={"num_predict": 200},
     )
     response_text = clean_text_for_tts(response["message"]["content"])
     logger.debug(f"🤖 Response: {response_text}")
-    new_convo= new_convo +[{"role": "assistant", "content": response_text}]
+
+    # Commit the assistant turn to state ASAP (before streaming TTS) so the
+    # next user turn can't see a stale convo if an interruption happens.
+    new_convo = new_convo + [{"role": "assistant", "content": response_text}]
     conversation_value += "AI: " + response_text + "\n"
+    yield (
+        sample_rate,
+        np.zeros((1, int(sample_rate * 0.02)), dtype=np.float32),
+    ), AdditionalOutputs(conversation_value, new_convo)
     #yield AdditionalOutputs(("assistant", response_text))
 
     for audio_chunk in tts_model.stream_tts_sync(response_text, KokoroTTSOptions(voice=voice_value, speed=1.0, lang=language_value=="Italian" and "it" or "en-us")):
@@ -388,6 +449,9 @@ with gr.Blocks(css="""
     language_state = gr.State("English")
     voice_state = gr.State("af_heart")
     transformers_convo = gr.State(value=[])
+    # Cache of server-side diarization utterances keyed by reply_id.
+    # Timer updates ONLY this state; `transformers_convo` remains single-writer via `response()`.
+    diarization_utterances_state = gr.State(value={})
     conversation_state = gr.State("")
 
     gr.HTML(
@@ -437,16 +501,20 @@ with gr.Blocks(css="""
             chat_state = gr.State([])
 
             timer=gr.Timer(2.0)
-            def update_html(transformers_convo):
-                return render_bubbles(transformers_convo)
-            timer.tick(update_html, inputs=[transformers_convo], outputs=[chat_md])
+            def update_html(transformers_convo, diarization_utterances_state):
+                merged = annotate_user_messages_with_speaker_runs(
+                    transformers_convo or [], diarization_utterances_state or {}
+                )
+                return render_bubbles(merged or [])
+            timer.tick(update_html, inputs=[transformers_convo, diarization_utterances_state], outputs=[chat_md])
 
             timer_diarization=gr.Timer(2.0)
-            def update_convo_with_diarization(transformers_convo):
-                diarization_utterances = get_diarization_utterances(SESSION_ID)
-                new_convo = annotate_user_messages_with_speaker_runs(transformers_convo, diarization_utterances)
-                return new_convo
-            timer_diarization.tick(update_convo_with_diarization, inputs=[transformers_convo], outputs=[transformers_convo])
+            def update_diarization_utterances():
+                try:
+                    return get_diarization_utterances(SESSION_ID) or {}
+                except Exception:
+                    return {}
+            timer_diarization.tick(update_diarization_utterances, inputs=[], outputs=[diarization_utterances_state])
         audio.stream(fn=ReplyOnPause(
         response, 
             algo_options=AlgoOptions(
@@ -461,7 +529,7 @@ with gr.Blocks(css="""
             min_silence_duration_ms=2000,   # helps ignore short hesitations
         ),
     ),
-        inputs=[audio, transformers_convo, conversation_state, language_state, voice_state], 
+        inputs=[audio, transformers_convo, conversation_state, language_state, voice_state, diarization_utterances_state], 
         outputs=[audio],
         )
         audio.on_additional_outputs( lambda s,r: (s,r),
